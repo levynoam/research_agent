@@ -74,18 +74,18 @@ def summarize(p: dict, criteria, fmt, cfg: dict, llm) -> tuple[dict, str]:
     return result, source
 
 
-def deepread(candidates: list[dict], criteria, fmt, cfg: dict, llm, store) -> None:
+def deepread(candidates: list[dict], criteria, fmt, cfg: dict, llm, store, run_id: str,
+             progress) -> None:
     dcfg = cfg["deepread"]
 
     def read_one(c):
-        if store.load_json("deepread", c["id"]):
+        if store.load_deepread(run_id, c["id"]):
             return  # already done in an earlier (interrupted) run
         p = store.paper(c["id"])
         result, source = summarize(p, criteria, fmt, cfg, llm)
         score = int(result.get("score", 0))
         relevant = bool(result.get("relevant")) and score >= dcfg["min_score"]
-        store.save_json("deepread", p["id"], result, relevant=int(relevant), score=score,
-                        source=source)
+        store.save_deepread(run_id, p["id"], result, relevant, score, source)
         log.info("deepread %s: relevant=%s score=%s (%s)", p["id"], relevant, score, source)
 
     with ThreadPoolExecutor(max_workers=dcfg["workers"]) as pool:
@@ -93,6 +93,7 @@ def deepread(candidates: list[dict], criteria, fmt, cfg: dict, llm, store) -> No
         for f in as_completed(futures):
             try:
                 f.result()
+                progress.advance()
             except BudgetExceeded:
                 raise
             except Exception as e:

@@ -24,3 +24,6 @@ build/
 
 # Downloaded paper text (re-fetchable)
 cache/
+
+# Local editor/tool settings
+.claude/

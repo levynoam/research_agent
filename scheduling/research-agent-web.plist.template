@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS launchd job: keeps the web app running at http://localhost:8765 while you're
+  logged in, and restarts it if it stops. Installed by scripts/install_web.sh.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.research-agent.web</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>__ROOT__/scripts/web.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__ROOT__/logs/web.log</string>
+    <key>StandardErrorPath</key>
+    <string>__ROOT__/logs/web.log</string>
+</dict>
+</plist>

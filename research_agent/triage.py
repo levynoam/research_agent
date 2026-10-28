@@ -37,7 +37,7 @@ def _batch_user(papers: list[dict]) -> str:
     return json.dumps(items, ensure_ascii=False)
 
 
-def triage(papers: list[dict], criteria, cfg: dict, llm, store) -> int:
+def triage(papers: list[dict], criteria, cfg: dict, llm, store, run_id: str, progress) -> int:
     """Scores papers in batches and saves results. Returns how many were scored."""
     tcfg = cfg["triage"]
     system = SYSTEM.format(criteria=criteria.text, topic_names=json.dumps(criteria.topics))
@@ -54,7 +54,8 @@ def triage(papers: list[dict], criteria, cfg: dict, llm, store) -> int:
                 log.warning("triage: no answer for %s", p["id"])
                 continue
             topics = [t for t in r.get("topics", []) if t in criteria.topics]
-            store.save_triage(p["id"], int(r.get("score", 0)), topics, r.get("reason", ""))
+            store.save_triage(run_id, p["id"], int(r.get("score", 0)), topics,
+                              r.get("reason", ""))
         return len(by_id)
 
     done = 0
@@ -63,6 +64,7 @@ def triage(papers: list[dict], criteria, cfg: dict, llm, store) -> int:
         for f in as_completed(futures):
             try:
                 done += f.result()
+                progress.advance(detail=f"{done} of {len(papers)} abstracts scored")
             except BudgetExceeded:
                 raise
             except Exception as e:  # one bad batch shouldn't sink the run

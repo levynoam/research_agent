@@ -110,6 +110,35 @@ scripts/run.sh --limit 30      # only 30 papers, for a quick, cheap test
 scripts/run.sh --no-research   # skip the web research agent
 ```
 
+### Web app
+
+A local web page to browse digests, start an ad-hoc digest, and watch the agent work:
+
+```bash
+scripts/install_web.sh      # keep it running at http://localhost:8765 whenever you're logged in
+scripts/uninstall_web.sh    # remove it
+scripts/web.sh              # or just run it in a terminal for now
+```
+
+- **Browse:** every daily and ad-hoc digest is listed on the left; click one to read it.
+- **Ad-hoc digest:** pick a date range (up to 14 days) and, optionally, a focus in plain
+  language ("speculative decoding for long-context serving"). The agent scans the papers
+  submitted in that range, fully reads the 60 most relevant at most, and writes a separate
+  digest. Typical cost is $2–6.
+- **Run today's digest** starts the daily run now instead of waiting for 07:00.
+- **Live status:** while a run is going, a bar at the top shows its stage, progress, cost
+  so far and the latest log lines.
+
+Only one run happens at a time; a second one waits for the first (a 07:00 run that finds
+an ad-hoc run going waits for it rather than being skipped). The page only accepts
+requests from this Mac's own browser, so other websites can't start runs.
+
+From the command line, an ad-hoc digest is:
+
+```bash
+scripts/run.sh --from 2026-10-20 --to 2026-10-27 --focus "speculative decoding"
+```
+
 Check spending and recent runs:
 
 ```bash
@@ -141,7 +170,8 @@ $0.03–0.15 per paper. Typically **a few dollars per day**.
 ```
 criteria.md            your research interests
 config.yaml            technical settings
-research_agent/        the code: fetch, triage, deepread, scholar, research, digest, cli
+research_agent/        the code: fetch, triage, deepread, scholar, research, digest, cli, web
+research_agent/static/ the web app's page, script and styles
 scripts/               run.sh and the schedule install/uninstall scripts
 scheduling/            the macOS schedule definition (template)
 digests/               daily outputs (not tracked by git)

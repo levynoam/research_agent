@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Research Agent</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◆</span>
+      <span>Research Agent</span>
+    </div>
+    <div class="spend" id="spend" title="Spending on the Inference Hub key"></div>
+    <div class="actions">
+      <button class="btn" id="run-daily">Run today's digest</button>
+      <button class="btn primary" id="new-adhoc">New ad-hoc digest</button>
+    </div>
+  </header>
+
+  <section id="status" class="status" hidden></section>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-filter="all">All</button>
+        <button class="tab" data-filter="daily">Daily</button>
+        <button class="tab" data-filter="adhoc">Ad-hoc</button>
+      </div>
+      <ul id="runs" class="runs"></ul>
+    </aside>
+
+    <section class="viewer">
+      <div class="viewer-bar">
+        <div>
+          <div id="viewer-title" class="viewer-title">Pick a digest</div>
+          <div id="viewer-meta" class="viewer-meta"></div>
+        </div>
+        <a id="open-tab" class="btn small" target="_blank" rel="noopener" hidden>Open in new tab ↗</a>
+      </div>
+      <iframe id="frame" title="Digest" hidden></iframe>
+      <div id="empty" class="empty">
+        <p>No digest selected.</p>
+        <p class="muted">Pick one on the left, or make a new one.</p>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="adhoc-dialog">
+    <form id="adhoc-form" method="dialog">
+      <h2>New ad-hoc digest</h2>
+      <p class="muted">Scans papers submitted to arXiv in a date range, reads the most relevant
+        ones in full, and writes a separate digest.</p>
+
+      <div class="row">
+        <label>From<input type="date" name="date_from" required></label>
+        <label>To<input type="date" name="date_to" required></label>
+      </div>
+
+      <label><span>Focus <span class="muted">(optional)</span></span>
+        <textarea name="focus" rows="3" maxlength="500"
+          placeholder="e.g. speculative decoding for long-context serving. Leave empty to use your topics from criteria.md."></textarea>
+      </label>
+
+      <label>arXiv categories
+        <input type="text" name="categories" placeholder="cs.LG, cs.CL">
+      </label>
+
+      <div class="checks">
+        <label class="check"><input type="checkbox" name="research" checked>
+          Web research on the top papers</label>
+        <label class="check"><input type="checkbox" name="images" checked>
+          Generate images where the paper has none that fits</label>
+      </div>
+
+      <p id="estimate" class="estimate"></p>
+      <p id="form-error" class="form-error" hidden></p>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="cancel-adhoc">Cancel</button>
+        <button type="submit" class="btn primary" id="submit-adhoc">Start</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

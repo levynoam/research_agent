@@ -18,7 +18,7 @@ class BudgetExceeded(Exception):
 
 
 class LLM:
-    def __init__(self, cfg: dict, store, run_date: str):
+    def __init__(self, cfg: dict, store, run_id: str):
         api = cfg["api"]
         key = os.environ.get(api["key_env"])
         if not key:
@@ -29,7 +29,7 @@ class LLM:
                              default_headers={"x-nv-application": api["app_name"]})
         self.cfg = cfg
         self.store = store
-        self.run_date = run_date
+        self.run_id = run_id
 
     # --- budget -------------------------------------------------------------
     def check_budget(self):
@@ -72,7 +72,7 @@ class LLM:
         tout = resp.usage.completion_tokens if resp.usage else 0
         cost_header = raw.headers.get("x-litellm-response-cost")
         usd = float(cost_header) if cost_header else self._fallback_cost(model, tin, tout)
-        self.store.add_cost(self.run_date, stage, model, tin, tout, usd)
+        self.store.add_cost(self.run_id, stage, model, tin, tout, usd)
         return resp.choices[0].message
 
     def chat_json(self, stage: str, model: str, system: str, user, max_tokens: int = 4000):
@@ -101,7 +101,7 @@ class LLM:
         resp = raw.parse()
         cost = raw.headers.get("x-litellm-response-cost")
         usd = float(cost) if cost else self.cfg["pricing"]["image_per_call"]
-        self.store.add_cost(self.run_date, "figures", model, 0, 0, usd)
+        self.store.add_cost(self.run_id, "figures", model, 0, 0, usd)
         data = resp.data[0]
         if data.b64_json:
             return base64.b64decode(data.b64_json)
@@ -118,7 +118,7 @@ class LLM:
         r.raise_for_status()
         cost = r.headers.get("x-litellm-response-cost")
         usd = float(cost) if cost else self.cfg["pricing"]["web_search_per_call"]
-        self.store.add_cost(self.run_date, "research", "perplexity-search", 0, 0, usd)
+        self.store.add_cost(self.run_id, "research", "perplexity-search", 0, 0, usd)
         return r.json().get("results", [])
 
 

@@ -3,7 +3,6 @@
 import html
 import json
 import logging
-from datetime import date
 from pathlib import Path
 
 import markdown
@@ -166,24 +165,21 @@ def _contents_table(ordered: list, columns: list[str], affiliations: dict) -> li
     return rows + [""]
 
 
-def write_digest(run_date: str, criteria, fmt, cfg: dict, store, llm, stats: dict,
+def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, stats: dict,
                  note: str | None = None) -> Path:
+    """Writes digests/<run id>.md and .html. stats: fetched, usd, scope (what was scanned)."""
     opts = fmt.options
     layout = opts.get("layout") or DEFAULT_LAYOUT
     columns = opts.get("contents_columns") or ["paper", "topic", "score", "h_index",
                                                "affiliations"]
     max_picks = int(opts.get("top_picks", 5))
-    rows = store.query(
-        "SELECT d.id, d.data FROM deepread d JOIN papers p ON p.id=d.id "
-        "WHERE p.run_date=? AND d.relevant=1 ORDER BY d.score DESC", (run_date,))
+    rows = store.deepread_rows(run_id, relevant=True)
     items = []
     for row in rows:
         p = store.paper(row["id"])
         items.append((p, json.loads(row["data"]), store.load_json("enrich", p["id"]),
                       store.load_json("research", p["id"]), store.load_json("figures", p["id"])))
-    rejected = store.query(
-        "SELECT p.id, p.title, p.url FROM deepread d JOIN papers p ON p.id=d.id "
-        "WHERE p.run_date=? AND d.relevant=0 ORDER BY d.score DESC", (run_date,))
+    rejected = [store.paper(r["id"]) for r in store.deepread_rows(run_id, relevant=False)]
 
     brief, picks, affiliations = "", [], {}
     if items:
@@ -232,27 +228,26 @@ def write_digest(run_date: str, criteria, fmt, cfg: dict, store, llm, stats: dic
             "If any should have made it, add them to criteria.md as examples.\n"
         ] + [f"- [{r['title']}]({r['url']})" for r in rejected]
 
-    d = date.fromisoformat(run_date)
-    md = [f"# arXiv digest: {d:%A %d %B %Y}",
-          f"<span class=\"meta\">{stats.get('fetched', 0)} new papers scanned in "
-          f"{', '.join(criteria.categories)} · {len(items)} matched · "
+    md = [f"# {title}",
+          f"<span class=\"meta\">{stats.get('fetched', 0)} {stats.get('scope', 'papers')} · "
+          f"{len(items)} matched · "
           f"${stats.get('usd', 0):.2f} spent</span>\n"]
     if note:
         md.append(f"> **Note:** {note}\n")
     if not items:
-        md.append("No papers matched your topics today.\n")
+        md.append("No papers matched.\n")
     for name in layout:
         md += blocks.get(name, [])
 
     text = "\n".join(md) + "\n"
     out_dir = Path(cfg["output"]["digest_dir"])
     out_dir.mkdir(exist_ok=True)
-    md_path = out_dir / f"{run_date}.md"
+    md_path = out_dir / f"{run_id}.md"
     md_path.write_text(text)
     body = markdown.markdown(text, extensions=["extra", "sane_lists"])
-    (out_dir / f"{run_date}.html").write_text(
+    (out_dir / f"{run_id}.html").write_text(
         f"<!doctype html><html><head><meta charset=\"utf-8\">"
         f"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        f"<title>arXiv digest {run_date}</title><style>{CSS}</style></head>"
+        f"<title>{html.escape(title)}</title><style>{CSS}</style></head>"
         f"<body>{body}</body></html>")
     return md_path

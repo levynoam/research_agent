@@ -78,16 +78,18 @@ def _generate_checked(prompt: str, summary: str, cfg, llm) -> tuple[bytes | None
     return None, problems
 
 
-def make_figures(paper_ids: list[str], run_date: str, fmt, cfg: dict, llm, store) -> None:
+def make_figures(paper_ids: list[str], run_id: str, fmt, cfg: dict, llm, store,
+                 progress) -> None:
     icfg = cfg["images"]
-    out_dir = Path(cfg["output"]["digest_dir"]) / "images" / run_date
+    out_dir = Path(cfg["output"]["digest_dir"]) / "images" / run_id
     generated = sum(1 for pid in paper_ids
                     if (store.load_json("figures", pid) or {}).get("choice") == "generate")
 
     for pid in paper_ids:
+        progress.advance()
         if store.load_json("figures", pid):
-            continue
-        p, s = store.paper(pid), store.load_json("deepread", pid)
+            continue  # images describe the paper, so they're shared by all digests
+        p, s = store.paper(pid), store.load_deepread(run_id, pid)
         try:
             figs = get_figures(p["id"], p["version"])
             summary = _summary_text(p, s)
@@ -112,7 +114,7 @@ def make_figures(paper_ids: list[str], run_date: str, fmt, cfg: dict, llm, store
                 if png:
                     out_dir.mkdir(parents=True, exist_ok=True)
                     (out_dir / f"{pid}.png").write_bytes(png)
-                    record |= {"choice": "generate", "path": f"images/{run_date}/{pid}.png",
+                    record |= {"choice": "generate", "path": f"images/{run_id}/{pid}.png",
                                "prompt": pick["image_prompt"]}
                     generated += 1
                 else:
