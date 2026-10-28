@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS scheduler (launchd) job: runs the digest at 07:00 local time, Monday to Friday.
+  Don't copy this file by hand; scripts/install_schedule.sh fills in __ROOT__ and installs it.
+  To change the time, edit Hour/Minute below and run the install script again.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.research-agent.daily</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>__ROOT__/scripts/run.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>__ROOT__/logs/scheduler.log</string>
+    <key>StandardErrorPath</key>
+    <string>__ROOT__/logs/scheduler.log</string>
+</dict>
+</plist>

@@ -1,0 +1,70 @@
+# Technical settings. Your research interests live in criteria.md, not here.
+
+api:
+  base_url: https://inference-api.nvidia.com/v1
+  key_env: RESEARCH_AGENT_API_KEY      # name of the environment variable holding the key
+  app_name: research-agent             # shows up in Inference Hub usage reports
+
+# Which model does each step. Any id from the Hub's /v1/models list works.
+models:
+  triage: azure/anthropic/eccn-claude-haiku-5-5     # reads every abstract: cheap and fast
+  deepread: azure/anthropic/eccn-claude-sonnet-5-5  # reads full text of matches
+  research: azure/anthropic/eccn-claude-sonnet-5-5  # web/scholar research on top papers
+  digest: azure/anthropic/eccn-claude-sonnet-5-5    # writes the daily overview
+  figures: azure/anthropic/eccn-claude-sonnet-5-5   # picks figures, checks generated images
+  authors: azure/anthropic/eccn-claude-haiku-5-5    # reads author names and affiliations
+
+# Fallback prices (USD per 1M tokens), used only if the Hub doesn't report a cost.
+# The Hub normally reports the exact cost of every call, and that is what gets logged.
+pricing:
+  azure/anthropic/eccn-claude-haiku-5-5: {input: 0.10, output: 0.50}
+  azure/anthropic/eccn-claude-sonnet-5-5: {input: 2.00, output: 10.00}
+  azure/anthropic/eccn-claude-opus-5-5: {input: 4.00, output: 20.00}
+  default: {input: 4.00, output: 20.00}
+  web_search_per_call: 0.005
+  image_per_call: 0.08
+
+# Hard spending limits. When a limit is hit the run stops spending and
+# still writes a digest from whatever it has finished.
+budget:
+  daily_usd: 50
+  monthly_usd: 1500
+
+triage:
+  batch_size: 20          # abstracts per model call
+  threshold: 6            # 0-10; papers scoring at least this get a full read
+  max_deepread_per_day: 60
+  workers: 4              # parallel model calls
+
+deepread:
+  max_chars: 120000       # cap on full-text length sent to the model (~30k tokens)
+  min_score: 6            # 0-10; papers must score at least this after the full read to make the digest
+  workers: 4              # parallel model calls; arXiv downloads stay one at a time
+
+enrich:
+  enabled: true
+  max_authors_per_paper: 8   # authors looked up per paper (for the h-index average)
+  similar_papers: 5
+  semantic_scholar_key_env: SEMANTIC_SCHOLAR_API_KEY   # optional; free key avoids rate limits
+  openalex_mailto: ""     # optional; your email gets faster OpenAlex service. Left empty on purpose.
+
+research:
+  enabled: true
+  max_papers_per_day: 5   # only the top-scoring papers get the research agent
+  min_score: 8
+  max_steps: 8            # tool calls per paper
+  fetch_max_chars: 12000  # page text the agent sees per fetched page
+
+images:
+  enabled: true           # false: only reuse paper figures, never generate
+  model: openai/openai/eccn-gpt-image-2.5-flare   # about $0.07 and 25 s per image
+  size: 1536x1024
+  max_generated_per_day: 10
+  verify: true            # a second model checks each generated image against the summary
+
+catchup:
+  max_days: 7             # if runs were missed, look back at most this many days
+
+output:
+  digest_dir: digests
+  notify: true            # macOS notification when the digest is ready

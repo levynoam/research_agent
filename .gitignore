@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local run data (personal output, not source code)
+state.db
+state.db-*
+logs/*
+!logs/.gitkeep
+digests/*
+!digests/.gitkeep
+
+# Secrets, just in case
+.env
+*.key
+
+# macOS
+.DS_Store
+
+# Packaging leftovers
+*.egg-info/
+build/
+
+# Downloaded paper text (re-fetchable)
+cache/

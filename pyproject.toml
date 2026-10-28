@@ -1,0 +1,27 @@
+[project]
+name = "research-agent"
+version = "0.1.0"
+description = "Daily arXiv triage, deep-read and TL;DR digest agent"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.50",
+    "httpx>=0.27",
+    "feedparser>=6.0",
+    "pyyaml>=6.0",
+    "trafilatura>=1.8",
+    "pypdf>=4.0",
+    "markdown>=3.5",
+    "beautifulsoup4>=4.12",
+]
+
+[project.scripts]
+research-agent = "research_agent.cli:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["research_agent"]
