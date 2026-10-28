@@ -5,6 +5,7 @@ All functions return plain dicts/lists and never raise on network trouble; they
 return an {"error": ...} entry instead, so one flaky API can't break a run.
 """
 
+import json
 import logging
 import os
 import re
@@ -14,6 +15,7 @@ import feedparser
 import httpx
 
 from research_agent import arxiv_http
+from research_agent.config import ROOT
 from research_agent.fulltext import get_author_block
 
 log = logging.getLogger(__name__)
@@ -31,11 +33,14 @@ class Scholar:
         self.mailto = ecfg.get("openalex_mailto") or ""
         self._last: dict[str, float] = {}
         self._s2_paper_blocked = False
+        self._exhausted: set[str] = set()  # APIs that told us to come back much later
 
     def _get(self, url: str, params=None, headers=None, tries: int = 4):
         # Space calls out: Semantic Scholar's keyless pool rate-limits bursts, and
         # OpenAlex asks for no more than 10 requests per second.
         host, gap = (S2, 1.1) if url.startswith(S2) else (OPENALEX, 0.2)
+        if host in self._exhausted:
+            return {"error": "rate limit reached earlier in this run"}
         wait = self._last.get(host, 0.0) + gap - time.monotonic()
         if wait > 0:
             time.sleep(wait)
@@ -43,8 +48,18 @@ class Scholar:
         for attempt in range(tries):
             try:
                 r = httpx.get(url, params=params, headers=headers, timeout=30)
-                if r.status_code == 429 and attempt < tries - 1:
-                    time.sleep(2 ** (attempt + 1))  # rate limited: back off and retry
+                if r.status_code == 429:
+                    try:
+                        retry_after = int(r.headers.get("retry-after", "0"))
+                    except ValueError:
+                        retry_after = 0
+                    if retry_after > 30 or attempt == tries - 1:
+                        # A daily quota, not a burst limit: stop asking until the next run.
+                        log.warning("%s rate limit reached (retry after %ss); skipping it "
+                                    "for the rest of this run", host, retry_after)
+                        self._exhausted.add(host)
+                        return {"error": "rate limited"}
+                    time.sleep(max(retry_after, 2 ** (attempt + 1)))
                     continue
                 if r.status_code == 404:
                     return None
@@ -138,6 +153,37 @@ Reply with ONLY a JSON list, one entry per author in that order:
 - Use [] when the header gives no affiliation for an author. Never guess from outside
   knowledge."""
 
+MAX_NAME_MATCH_H_INDEX = 100
+LOOKUP_FAILED = {"error": "lookup failed"}  # the API didn't answer; unlike "no match", not cached
+AUTHOR_CACHE = ROOT / "cache" / "authors.json"
+CACHE_DAYS = {"found": 30, "not_found": 7}
+
+
+class AuthorCache:
+    """Remembers author lookups between runs, so the same people aren't looked up daily."""
+
+    def __init__(self):
+        try:
+            self.data = json.loads(AUTHOR_CACHE.read_text())
+        except (OSError, ValueError):
+            self.data = {}
+
+    @staticmethod
+    def key(name: str, affiliations: list[str]) -> str:
+        return f"{name.lower()}|{'|'.join(sorted(a.lower() for a in affiliations))}"
+
+    def get(self, key: str) -> dict | None:
+        hit = self.data.get(key)
+        if not hit:
+            return None
+        days = CACHE_DAYS["found" if hit.get("h_index") is not None else "not_found"]
+        return hit if time.time() - hit["ts"] < days * 86400 else None
+
+    def put(self, key: str, h_index, citations):
+        self.data[key] = {"h_index": h_index, "citations": citations, "ts": time.time()}
+        AUTHOR_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        AUTHOR_CACHE.write_text(json.dumps(self.data))
+
 GENERIC_WORDS = {"university", "univ", "institute", "of", "the", "and", "for", "technology",
                  "science", "sciences", "inc", "ltd", "llc", "corporation", "corp", "lab",
                  "labs", "laboratory", "research", "school", "college", "department", "dept",
@@ -170,21 +216,28 @@ def _openalex_matched(scholar: "Scholar", name: str, affiliations: list[str]) ->
         params["mailto"] = scholar.mailto
     data = scholar._get(f"{OPENALEX}/authors", params)
     if not data or "error" in data:
-        return None
-    best = None
+        return LOOKUP_FAILED
+    matches = []
     for c in data.get("results", []):
         insts = [i.get("display_name", "") for i in c.get("last_known_institutions") or []]
         insts += [a.get("institution", {}).get("display_name", "")
                   for a in c.get("affiliations") or []]
         if any(_same_institution(x, y) for x in affiliations for y in insts if x and y):
-            if best is None or (c.get("works_count") or 0) > (best.get("works_count") or 0):
-                best = c
-    return best
+            matches.append(c)
+    if len(matches) != 1:
+        return None  # nobody, or several people with this name at that institution
+    h = (matches[0].get("summary_stats") or {}).get("h_index") or 0
+    if h >= MAX_NAME_MATCH_H_INDEX:
+        # Very high values from a name search are almost always several people merged
+        # into one profile (common names). Real cases come through Semantic Scholar.
+        return None
+    return matches[0]
 
 
 def enrich_paper(p: dict, cfg: dict, scholar: Scholar, llm) -> dict:
     """Authors (with affiliations from the paper itself, and h-index) and similar papers."""
     ecfg = cfg["enrich"]
+    author_cache = AuthorCache()
     limit = ecfg["max_authors_per_paper"]
 
     # 1. Who the authors are and where they work, read from the paper's own header.
@@ -204,22 +257,35 @@ def enrich_paper(p: dict, cfg: dict, scholar: Scholar, llm) -> dict:
     # institution (so a namesake elsewhere isn't picked up).
     s2 = scholar.s2_paper(p["id"])
     s2_authors = s2.get("authors", []) if s2 and "error" not in s2 else []
+    # The first authors plus the last one (often the senior author).
+    picks = list(range(min(limit - 1, len(people))))
+    if len(people) > len(picks):
+        picks.append(len(people) - 1)
     authors = []
-    for i, person in enumerate(people[:limit]):
+    for i in picks:
+        person = people[i]
         affs = person.get("affiliations") or []
         entry = {"name": person.get("name"), "h_index": None, "citations": None,
                  "affiliations": [a.get("short") or a.get("full") for a in affs],
                  "source": None}
+        full_affs = [a.get("full") or a.get("short") or "" for a in affs]
+        key = AuthorCache.key(entry["name"] or "", full_affs)
+        cached = author_cache.get(key)
         if i < len(s2_authors) and s2_authors[i].get("hIndex") is not None:
             entry |= {"h_index": s2_authors[i]["hIndex"],
                       "citations": s2_authors[i].get("citationCount"),
                       "source": "semantic-scholar"}
-        else:
-            match = _openalex_matched(scholar, entry["name"] or "",
-                                      [a.get("full") or a.get("short") or "" for a in affs])
-            if match:
-                entry |= {"h_index": (match.get("summary_stats") or {}).get("h_index"),
-                          "citations": match.get("cited_by_count"), "source": "openalex"}
+        elif cached:
+            entry |= {"h_index": cached["h_index"], "citations": cached["citations"],
+                      "source": "openalex" if cached["h_index"] is not None else None}
+        elif affs:
+            match = _openalex_matched(scholar, entry["name"] or "", full_affs)
+            if match is not LOOKUP_FAILED:
+                h = (match.get("summary_stats") or {}).get("h_index") if match else None
+                cites = match.get("cited_by_count") if match else None
+                author_cache.put(key, h, cites)
+                if match:
+                    entry |= {"h_index": h, "citations": cites, "source": "openalex"}
         authors.append(entry)
 
     all_affiliations = []

@@ -43,7 +43,7 @@ deepread:
 
 enrich:
   enabled: true
-  max_authors_per_paper: 8   # authors looked up per paper (for the h-index average)
+  max_authors_per_paper: 4   # authors looked up per paper: the first ones plus the last
   similar_papers: 5
   semantic_scholar_key_env: SEMANTIC_SCHOLAR_API_KEY   # optional; free key avoids rate limits
   openalex_mailto: ""     # optional; your email gets faster OpenAlex service. Left empty on purpose.

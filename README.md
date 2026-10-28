@@ -61,6 +61,13 @@ The average h-index is computed from author profiles on Semantic Scholar or Open
 OpenAlex profile is only used when both the name and the institution match, so a
 namesake elsewhere isn't counted. Coverage is shown as found/looked-up authors.
 
+Without API keys both services are tight: Semantic Scholar's shared pool is usually
+rate-limited, and OpenAlex allows roughly 100 author searches per day. The agent looks
+up the first three authors and the last one per paper, remembers results for 30 days,
+and stops calling a service for the rest of a run once it says its quota is used up.
+For reliable h-index coverage, get a free Semantic Scholar API key and put it in
+`SEMANTIC_SCHOLAR_API_KEY`.
+
 ### Images
 
 The `# Figure` section of `summary_format.md` says when to reuse a paper figure and

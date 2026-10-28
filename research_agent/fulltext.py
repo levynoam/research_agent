@@ -120,10 +120,25 @@ def get_author_block(pid: str, version: str) -> str:
     except arxiv_http.ArxivBlocked:
         return ""
     block = (CACHE / f"{pid}{version}.authors.txt").read_text()
-    pdf = CACHE / f"{pid}{version}.pdf.txt"
-    if not block and pdf.exists():
-        block = pdf.read_text()[:3000]  # the PDF's title page lists authors and affiliations
-    return block
+    if block:
+        return block
+    # No author block on the HTML page: the PDF's title page lists authors and affiliations.
+    pdf_text = CACHE / f"{pid}{version}.pdf.txt"
+    title_page = CACHE / f"{pid}{version}.titlepage.txt"
+    if pdf_text.exists():
+        return pdf_text.read_text()[:3000]
+    if not title_page.exists():
+        text = ""
+        try:
+            r = arxiv_http.get(f"https://arxiv.org/pdf/{pid}{version}", timeout=120)
+            if r.status_code == 200:
+                text = (PdfReader(io.BytesIO(r.content)).pages[0].extract_text() or "")[:3000]
+        except arxiv_http.ArxivBlocked:
+            return ""
+        except Exception as e:
+            log.info("no title page for %s: %s", pid, e)
+        title_page.write_text(text)  # cached even if empty, so it's tried only once
+    return title_page.read_text()
 
 
 def code_links(text: str) -> list[str]:

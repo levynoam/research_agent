@@ -161,7 +161,8 @@ def _contents_table(ordered: list, columns: list[str], affiliations: dict) -> li
     if "h_index" in columns:
         rows.append("\n<span class=\"meta\">Avg h-index: average over the authors whose "
                     "profile was found (found/looked up). Profiles are matched by name and "
-                    "institution; sources differ, so treat it as a rough signal.</span>")
+                    "institution, and ambiguous or implausible matches are skipped; sources differ, so "
+                    "treat it as a rough signal.</span>")
     return rows + [""]
 
 
