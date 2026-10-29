@@ -64,9 +64,13 @@ namesake elsewhere isn't counted. Coverage is shown as found/looked-up authors.
 Without API keys both services are tight: Semantic Scholar's shared pool is usually
 rate-limited, and OpenAlex allows roughly 100 author searches per day. The agent looks
 up the first three authors and the last one per paper, remembers results for 30 days,
-and stops calling a service for the rest of a run once it says its quota is used up.
-For reliable h-index coverage, get a free Semantic Scholar API key and put it in
-`SEMANTIC_SCHOLAR_API_KEY`.
+and stops calling a service for the rest of a run once it says its quota is used up
+(or after three requests in a row fail). For reliable h-index coverage, get a free
+Semantic Scholar API key (see Setup).
+
+With a key, Semantic Scholar allows 1 request per second. The agent waits a little
+over a second after each reply. Even so, Semantic Scholar refuses a share of requests
+now and then; those are retried after a short wait, so lookups take about 3 s each.
 
 ### Images
 
@@ -97,8 +101,17 @@ export RESEARCH_AGENT_API_KEY=...
 ```
 
 Optional: a free [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key-form)
-in `SEMANTIC_SCHOLAR_API_KEY` gives better author data (without it, that API is often
-rate-limited and the agent falls back to OpenAlex, which indexes new papers a few days late).
+gives better author data. Without it, that API is often rate-limited and the agent falls
+back to OpenAlex, which indexes new papers a few days late. If you have one, add it to
+`~/.zshrc` the same way:
+
+```bash
+export SEMANTIC_SCHOLAR_API_KEY=...
+```
+
+`scripts/run.sh` (and so the schedule and the web app) picks up these two lines from
+`~/.zshrc` and nothing else from it. If there's no Semantic Scholar line, the agent
+runs without it.
 
 ## Running
 

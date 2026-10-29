@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 
 import feedparser
@@ -23,6 +24,7 @@ log = logging.getLogger(__name__)
 S2 = "https://api.semanticscholar.org"
 OPENALEX = "https://api.openalex.org"
 ARXIV_API = "https://export.arxiv.org/api/query"
+MAX_FAILS_IN_A_ROW = 3
 
 
 class Scholar:
@@ -32,40 +34,78 @@ class Scholar:
         self.s2_headers = {"x-api-key": key} if key else {}
         self.mailto = ecfg.get("openalex_mailto") or ""
         self._last: dict[str, float] = {}
+        self._lock = threading.Lock()  # one request at a time, so the spacing always holds
         self._s2_paper_blocked = False
         self._exhausted: set[str] = set()  # APIs that told us to come back much later
+        self._fails: dict[str, int] = {}  # requests in a row that failed after all retries
 
     def _get(self, url: str, params=None, headers=None, tries: int = 4):
-        # Space calls out: Semantic Scholar's keyless pool rate-limits bursts, and
+        with self._lock:
+            out = self._get_locked(url, params, headers, tries)
+        host = S2 if url.startswith(S2) else OPENALEX
+        if out is not None and "error" in out:
+            self._fails[host] = self._fails.get(host, 0) + 1
+            if self._fails[host] >= MAX_FAILS_IN_A_ROW and host not in self._exhausted:
+                log.warning("%s keeps failing; skipping it for the rest of this run", host)
+                self._exhausted.add(host)
+        else:
+            self._fails[host] = 0
+        return out
+
+    def _pace(self, host: str, gap: float):
+        wait = self._last.get(host, 0.0) + gap - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+
+    def _get_locked(self, url: str, params, headers, tries: int):
+        # Space calls out. Semantic Scholar allows 1 request per second across all its
+        # endpoints (with or without a key), so wait a bit more than 1 s after each reply.
         # OpenAlex asks for no more than 10 requests per second.
         host, gap = (S2, 1.1) if url.startswith(S2) else (OPENALEX, 0.2)
         if host in self._exhausted:
             return {"error": "rate limit reached earlier in this run"}
-        wait = self._last.get(host, 0.0) + gap - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-        self._last[host] = time.monotonic()
         for attempt in range(tries):
+            self._pace(host, gap)
             try:
                 r = httpx.get(url, params=params, headers=headers, timeout=30)
-                if r.status_code == 429:
-                    try:
-                        retry_after = int(r.headers.get("retry-after", "0"))
-                    except ValueError:
-                        retry_after = 0
-                    if retry_after > 30 or attempt == tries - 1:
-                        # A daily quota, not a burst limit: stop asking until the next run.
-                        log.warning("%s rate limit reached (retry after %ss); skipping it "
-                                    "for the rest of this run", host, retry_after)
-                        self._exhausted.add(host)
-                        return {"error": "rate limited"}
-                    time.sleep(max(retry_after, 2 ** (attempt + 1)))
-                    continue
-                if r.status_code == 404:
-                    return None
+            except httpx.HTTPError as e:
+                if attempt == tries - 1:
+                    log.info("request failed %s: %s", url, e)
+                    return {"error": str(e)}
+                time.sleep(2)
+                continue
+            finally:
+                self._last[host] = time.monotonic()
+            if r.status_code == 429:
+                try:
+                    retry_after = int(r.headers.get("retry-after", "0"))
+                except ValueError:
+                    retry_after = 0
+                if retry_after > 30:
+                    # A daily quota, not a burst limit: stop asking until the next run.
+                    log.warning("%s rate limit reached (retry after %ss); skipping it "
+                                "for the rest of this run", host, retry_after)
+                    self._exhausted.add(host)
+                    return {"error": "rate limited"}
+                if attempt == tries - 1:
+                    # Semantic Scholar sometimes refuses a share of requests even when
+                    # they are well spaced. Skip this one; a streak of these stops the host.
+                    log.info("%s still rate limiting after %d tries: %s", host, tries, url)
+                    return {"error": "rate limited"}
+                time.sleep(max(retry_after, 2 ** (attempt + 1)))
+                continue
+            if r.status_code == 404:
+                return None
+            if r.status_code in (401, 403) and host == S2 and headers:
+                # A wrong or revoked key: don't keep sending it.
+                log.warning("Semantic Scholar rejected the API key (HTTP %s); skipping it "
+                            "for the rest of this run", r.status_code)
+                self._exhausted.add(host)
+                return {"error": "API key rejected"}
+            try:
                 r.raise_for_status()
                 return r.json()
-            except httpx.HTTPError as e:
+            except (httpx.HTTPError, ValueError) as e:
                 if attempt == tries - 1:
                     log.info("request failed %s: %s", url, e)
                     return {"error": str(e)}
