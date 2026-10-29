@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS runs (
     run_date TEXT PRIMARY KEY,                       -- the run id
     started TEXT, finished TEXT, status TEXT,
     n_fetched INTEGER, n_matched INTEGER, usd REAL, digest TEXT, last_announced TEXT,
-    kind TEXT, label TEXT, params TEXT
+    kind TEXT, label TEXT, params TEXT, note TEXT
 );
 """
 
@@ -73,7 +73,7 @@ def _migrate(db):
             DROP TABLE deepread_old;
             INSERT OR IGNORE INTO run_papers SELECT run_date, id FROM papers;
         """)
-    for col in ("kind", "label", "params"):
+    for col in ("kind", "label", "params", "note"):
         if col not in _columns(db, "runs"):
             db.execute(f"ALTER TABLE runs ADD COLUMN {col} TEXT")
     db.commit()

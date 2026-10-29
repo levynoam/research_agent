@@ -156,6 +156,24 @@ dialog textarea { resize: vertical; }
 .form-error { margin: 0; color: var(--bad); font-size: 13px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
+/* --- prompt editor ------------------------------------------------------------ */
+.prompts-dialog { width: min(1000px, calc(100vw - 32px)); height: min(860px, calc(100vh - 48px)); padding: 0; }
+.prompts { display: flex; flex-direction: column; gap: 10px; height: 100%; padding: 18px 20px; }
+.prompts-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.prompt-tabs { padding: 0; border: 0; flex: 0 1 380px; }
+.prompt-help { margin: 0; font-size: 13px; }
+#prompt-text {
+  flex: 1; min-height: 200px; resize: none; padding: 12px 14px;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
+}
+#prompt-text:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.prompt-summary { margin: 0; font-size: 13px; color: var(--ok); }
+.prompt-summary.bad { color: var(--bad); }
+.prompt-actions { align-items: center; margin: 0; }
+.prompt-state { margin-right: auto; font-size: 13px; }
+.empty .note { max-width: 520px; }
+
 /* --- toast -------------------------------------------------------------------- */
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);

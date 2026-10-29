@@ -115,6 +115,20 @@ def cmd_run(args):
         raise
 
 
+def _no_papers_note(adhoc: bool) -> str:
+    """Why a run found nothing, in words for the log and the web app."""
+    if adhoc:
+        return "No papers in these categories were submitted in this date range."
+    if date.today().weekday() >= 5:
+        return "arXiv doesn't publish new papers on weekends."
+    # arXiv announces Sunday to Thursday evenings (US Eastern), so a weekday morning
+    # normally has a batch. An empty feed means arXiv skipped this announcement
+    # (a holiday or maintenance). Nothing is lost: if papers appear later, the next
+    # run sees the gap and fetches them from the arXiv API.
+    return ("arXiv published no new papers today (its feed is empty for all categories, "
+            "usually a holiday or maintenance). The next run will pick up anything missed.")
+
+
 def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progress: Progress):
     adhoc = kind == "adhoc"
     cfg, criteria, fmt = load_config(), load_criteria(), load_format()
@@ -150,9 +164,11 @@ def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progres
         fetched = store.count_for_run(run_id)
         store.save_run(run_id, n_fetched=fetched, last_announced=announced)
         if fetched == 0:
-            log.info("nothing new from arXiv (weekend or holiday)")
-            store.save_run(run_id, status="ok", finished=datetime.now().isoformat(timespec="seconds"))
-            progress.finish("done", detail="No new papers on arXiv today")
+            note = _no_papers_note(adhoc)
+            log.info("no papers: %s", note)
+            store.save_run(run_id, status="ok", note=note,
+                           finished=datetime.now().isoformat(timespec="seconds"))
+            progress.finish("done", detail=note)
             return
 
         # 2. Triage every abstract

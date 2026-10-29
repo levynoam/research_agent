@@ -1,12 +1,15 @@
 """Loads config.yaml (technical settings) and criteria.md (research interests)."""
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
+CRITERIA = ROOT / "criteria.md"
+FORMAT = ROOT / "summary_format.md"
 
 
 @dataclass
@@ -30,6 +33,15 @@ class SummaryFormat:
         return [name for name, _ in self.sections]
 
 
+def ensure_from_template(path: Path) -> Path:
+    """Your own criteria.md and summary_format.md are not tracked by git (they say what
+    you work on). On a fresh copy they start out as copies of the *.example.md files."""
+    template = path.with_name(f"{path.stem}.example.md")
+    if not path.exists() and template.exists():
+        shutil.copyfile(template, path)
+    return path
+
+
 def _split_front_matter(path: Path) -> tuple[dict, str]:
     raw = path.read_text()
     match = re.match(r"^---\n(.*?)\n---\n(.*)$", raw, re.DOTALL)
@@ -50,8 +62,8 @@ def _top_sections(body: str) -> dict[str, str]:
     return {k: v.strip() for k, v in out.items()}
 
 
-def load_format(path: Path = ROOT / "summary_format.md") -> SummaryFormat:
-    options, body = _split_front_matter(path)
+def load_format(path: Path = FORMAT) -> SummaryFormat:
+    options, body = _split_front_matter(ensure_from_template(path))
     parts = _top_sections(body)
     sections, name = [], None
     for line in parts.get("sections", "").splitlines():
@@ -74,8 +86,8 @@ def load_config(path: Path = ROOT / "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
-def load_criteria(path: Path = ROOT / "criteria.md") -> Criteria:
-    front, body = _split_front_matter(path)
+def load_criteria(path: Path = CRITERIA) -> Criteria:
+    front, body = _split_front_matter(ensure_from_template(path))
     categories = front.get("categories") or []
     if not categories:
         raise ValueError(f"{path}: no categories listed")

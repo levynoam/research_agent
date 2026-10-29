@@ -26,6 +26,14 @@ Models run on any OpenAI-compatible API. The defaults target NVIDIA Inference Hu
 | `summary_format.md` | **How summaries look**: the TL;DR, which sections each summary has (add, remove, rename, reorder), when to reuse or generate an image, writing style, the daily overview, and which extras the digest shows. Read fresh on every run. |
 | `config.yaml` | Technical knobs: which model per step, spending limits, thresholds, how many papers get the research agent. |
 
+The first two can also be edited in the web app (**Edit prompts**, see below).
+
+Your `criteria.md` and `summary_format.md` are not tracked by git, so your research
+interests stay private even though the code is public. The repository has templates
+instead (`criteria.example.md`, `summary_format.example.md`). The first run, or opening
+**Edit prompts**, copies them to your own files if those don't exist yet. To start over
+from a template, delete your file and it is copied again.
+
 Tips for `criteria.md`:
 - Each `##` heading under `# Topics` is one topic; its name is used to group the digest.
 - Concrete include/exclude lists and example papers improve accuracy more than long prose.
@@ -133,6 +141,13 @@ scripts/uninstall_web.sh    # remove it
 scripts/web.sh              # or just run it in a terminal for now
 ```
 
+After updating the code, restart the installed web app so it picks up the change
+(running `scripts/install_web.sh` again does the same):
+
+```bash
+launchctl kickstart -k gui/$(id -u)/local.research-agent.web
+```
+
 - **Browse:** every daily and ad-hoc digest is listed on the left; click one to read it.
 - **Ad-hoc digest:** pick a date range (up to 14 days) and, optionally, a focus in plain
   language ("speculative decoding for long-context serving"). The agent scans the papers
@@ -141,6 +156,14 @@ scripts/web.sh              # or just run it in a terminal for now
 - **Run today's digest** starts the daily run now instead of waiting for 07:00.
 - **Live status:** while a run is going, a bar at the top shows its stage, progress, cost
   so far and the latest log lines.
+- **Edit prompts:** opens `criteria.md` and `summary_format.md` in an editor. Saving
+  checks the file the same way the agent reads it (categories, topics, sections), and
+  refuses to save a file the agent couldn't use. The previous version is kept in
+  `cache/prompt-backups/`. Changes apply from the next run. Cmd+S saves.
+- **Days with no papers:** arXiv publishes nothing on weekends and occasionally skips a
+  weekday (a holiday or maintenance). Those runs show "No new papers" with the reason.
+  Nothing is lost on a skipped weekday: the next run notices the gap and fetches any
+  missed papers from the arXiv API.
 
 Only one run happens at a time; a second one waits for the first (a 07:00 run that finds
 an ad-hoc run going waits for it rather than being skipped). The page only accepts
@@ -181,7 +204,9 @@ $0.03–0.15 per paper. Typically **a few dollars per day**.
 ## Where things are
 
 ```
-criteria.md            your research interests
+criteria.md            your research interests (yours, not tracked by git)
+summary_format.md      how summaries and the digest look (yours, not tracked by git)
+*.example.md           the templates the two files above start from
 config.yaml            technical settings
 research_agent/        the code: fetch, triage, deepread, scholar, research, digest, cli, web
 research_agent/static/ the web app's page, script and styles

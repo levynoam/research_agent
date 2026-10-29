@@ -45,6 +45,7 @@ async function loadOverview() {
 function runMeta(r) {
   if (r.state === "failed") return r.error ? `Failed: ${r.error}` : "Failed";
   if (r.state === "running" || r.state === "queued") return "In progress…";
+  if (r.state === "done" && !r.digest && r.scanned === 0) return "No new papers";
   const bits = [];
   if (r.matched != null) bits.push(`${r.matched} matched`);
   if (r.scanned != null) bits.push(`${r.scanned} scanned`);
@@ -100,6 +101,8 @@ function showRun(id, { keepFrame = false } = {}) {
     open.hidden = true;
     empty.innerHTML = r && (r.state === "running" || r.state === "queued")
       ? `<p>This digest is still being made.</p><p class="muted">Progress is shown above.</p>`
+      : r && r.note
+        ? `<p>No digest for this run.</p><p class="muted note">${escapeHtml(r.note)}</p>`
       : r && r.state === "failed"
         ? `<p>This run failed.</p><p class="muted">${escapeHtml(r.error || "See the logs folder.")}</p>`
         : `<p>No digest selected.</p><p class="muted">Pick one on the left, or make a new one.</p>`;
@@ -146,7 +149,10 @@ async function pollStatus() {
         state.watching.delete(id);
         await Promise.all([loadRuns(), loadOverview()]);
         const r = state.runs.find((x) => x.id === id);
-        if (r && r.state === "done") {
+        if (r && r.state === "done" && !r.digest && r.note) {
+          toast("No new papers, so no digest");
+          showRun(id);
+        } else if (r && r.state === "done") {
           toast(`Digest ready: ${r.matched ?? 0} papers matched`);
           showRun(id);
         } else if (r && r.state === "failed") {
@@ -258,6 +264,131 @@ async function runDaily() {
     toast(e.message);
   }
 }
+
+// --- prompt files (criteria.md, summary_format.md) ---------------------------------------
+const prompts = { files: [], current: null, edits: {} }; // edits: name -> unsaved text
+
+function promptFile(name) { return prompts.files.find((f) => f.name === name); }
+function isDirty(name) {
+  const f = promptFile(name);
+  return f && name in prompts.edits && prompts.edits[name] !== f.text;
+}
+
+function renderPromptTabs() {
+  $("#prompt-tabs").innerHTML = prompts.files.map((f) => `
+    <button class="tab ${f.name === prompts.current ? "active" : ""}" data-name="${f.name}">
+      ${escapeHtml(f.title)}${isDirty(f.name) ? " •" : ""}</button>`).join("");
+}
+
+function renderPromptStatus(message, kind = "") {
+  const f = promptFile(prompts.current);
+  const summary = $("#prompt-summary");
+  if (message) {
+    summary.textContent = message;
+    summary.className = `prompt-summary ${kind}`;
+  } else if (f.problem) {
+    summary.textContent = `This file has a problem the agent will stop on: ${f.problem}`;
+    summary.className = "prompt-summary bad";
+  } else {
+    summary.textContent = f.summary;
+    summary.className = "prompt-summary";
+  }
+  const dirty = isDirty(prompts.current);
+  $("#prompt-state").textContent = dirty ? "Unsaved changes" : `${f.file} · saved`;
+  $("#prompt-save").disabled = !dirty;
+  $("#prompt-revert").disabled = !dirty;
+  renderPromptTabs();
+}
+
+function selectPrompt(name) {
+  if (prompts.current) prompts.edits[prompts.current] = $("#prompt-text").value;
+  prompts.current = name;
+  const f = promptFile(name);
+  $("#prompt-help").textContent = f.help;
+  const box = $("#prompt-text");
+  box.value = prompts.edits[name] ?? f.text;
+  box.setSelectionRange(0, 0);
+  box.scrollTop = 0;
+  renderPromptStatus();
+}
+
+async function openPrompts() {
+  try {
+    prompts.files = await api("/api/prompts");
+  } catch (e) {
+    toast(`Could not load the files: ${e.message}`);
+    return;
+  }
+  // Keep unsaved edits from last time only if the file hasn't changed underneath them.
+  for (const f of prompts.files) {
+    if (prompts.edits[f.name] !== undefined && prompts.edits[`${f.name}:base`] !== f.version) {
+      delete prompts.edits[f.name];
+    }
+  }
+  const name = prompts.current && promptFile(prompts.current) ? prompts.current : prompts.files[0].name;
+  prompts.current = null;
+  selectPrompt(name);
+  $("#prompts-dialog").showModal();
+  $("#prompt-text").focus();
+}
+
+async function savePrompt() {
+  const name = prompts.current, f = promptFile(name);
+  const text = $("#prompt-text").value;
+  $("#prompt-save").disabled = true;
+  try {
+    const res = await api(`/api/prompts/${name}`, {
+      method: "POST", body: JSON.stringify({ text, version: f.version }),
+    });
+    f.text = text.endsWith("\n") ? text : text + "\n";
+    f.version = res.version;
+    f.summary = res.summary;
+    f.problem = null;
+    delete prompts.edits[name];
+    $("#prompt-text").value = f.text;
+    renderPromptStatus();
+    toast(`${f.file} saved. The next run uses it.`);
+    if (name === "criteria") loadOverview();
+  } catch (e) {
+    renderPromptStatus(e.message, "bad");
+  }
+}
+
+function closePrompts(event) {
+  prompts.edits[prompts.current] = $("#prompt-text").value;
+  for (const f of prompts.files) prompts.edits[`${f.name}:base`] = f.version;
+  const unsaved = prompts.files.filter((f) => isDirty(f.name)).map((f) => f.file);
+  if (unsaved.length && !confirm(`Close without saving ${unsaved.join(" and ")}? ` +
+                                 "Your changes stay here until you reload the page.")) {
+    event?.preventDefault();
+    return;
+  }
+  $("#prompts-dialog").close();
+}
+
+$("#edit-prompts").addEventListener("click", openPrompts);
+$("#prompt-tabs").addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab");
+  if (tab) selectPrompt(tab.dataset.name);
+});
+$("#prompt-text").addEventListener("input", () => {
+  prompts.edits[prompts.current] = $("#prompt-text").value;
+  renderPromptStatus();
+});
+$("#prompt-save").addEventListener("click", savePrompt);
+$("#prompt-revert").addEventListener("click", () => {
+  delete prompts.edits[prompts.current];
+  $("#prompt-text").value = promptFile(prompts.current).text;
+  renderPromptStatus();
+});
+$("#prompt-close").addEventListener("click", () => closePrompts());
+$("#prompts-dialog").addEventListener("cancel", closePrompts); // the Esc key
+$("#prompts-dialog").addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+    e.preventDefault();
+    if (isDirty(prompts.current)) savePrompt();
+  }
+});
 
 // --- wiring ------------------------------------------------------------------------------
 $("#runs").addEventListener("click", (e) => {

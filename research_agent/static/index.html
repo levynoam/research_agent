@@ -14,6 +14,7 @@
     </div>
     <div class="spend" id="spend" title="Spending on the Inference Hub key"></div>
     <div class="actions">
+      <button class="btn" id="edit-prompts">Edit prompts</button>
       <button class="btn" id="run-daily">Run today's digest</button>
       <button class="btn primary" id="new-adhoc">New ad-hoc digest</button>
     </div>
@@ -82,6 +83,24 @@
         <button type="submit" class="btn primary" id="submit-adhoc">Start</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="prompts-dialog" class="prompts-dialog">
+    <div class="prompts">
+      <div class="prompts-head">
+        <h2>Agent prompts</h2>
+        <div class="tabs prompt-tabs" id="prompt-tabs" role="tablist"></div>
+      </div>
+      <p id="prompt-help" class="muted prompt-help"></p>
+      <textarea id="prompt-text" spellcheck="false" aria-label="File contents"></textarea>
+      <p id="prompt-summary" class="prompt-summary"></p>
+      <div class="dialog-actions prompt-actions">
+        <span id="prompt-state" class="prompt-state muted"></span>
+        <button type="button" class="btn" id="prompt-revert">Undo my changes</button>
+        <button type="button" class="btn" id="prompt-close">Close</button>
+        <button type="button" class="btn primary" id="prompt-save">Save</button>
+      </div>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" hidden></div>

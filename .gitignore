@@ -27,3 +27,8 @@ cache/
 
 # Local editor/tool settings
 .claude/
+.*.tmp
+
+# Your own research interests and format (start from the *.example.md templates)
+criteria.md
+summary_format.md
