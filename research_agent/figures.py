@@ -97,7 +97,7 @@ def make_figures(paper_ids: list[str], run_id: str, fmt, cfg: dict, llm, store,
                 "(none available: the paper has no HTML version, or no figures)"
             pick = llm.chat_json("figures", cfg["models"]["figures"],
                                  CHOOSE.format(rules=fmt.figure),
-                                 f"{summary}\n\nThe paper's figures:\n{listing}", max_tokens=800)
+                                 f"{summary}\n\nThe paper's figures:\n{listing}", max_tokens=1500)
 
             record = {"choice": "none", "caption": pick.get("caption", "")}
             try:

@@ -47,6 +47,7 @@ function runMeta(r) {
   if (r.state === "running" || r.state === "queued") return "In progress…";
   if (r.state === "done" && !r.digest && r.scanned === 0) return "No new papers";
   const bits = [];
+  if (r.digest && r.note) bits.push("Incomplete");
   if (r.matched != null) bits.push(`${r.matched} matched`);
   if (r.scanned != null) bits.push(`${r.scanned} scanned`);
   bits.push(`$${(r.usd || 0).toFixed(2)}`);

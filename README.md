@@ -1,6 +1,7 @@
 # research-agent
 
-A daily arXiv reading assistant. Every weekday morning it:
+A daily arXiv reading assistant. Every evening that arXiv releases new papers (Sunday to
+Thursday, 10 pm local time by default) it:
 
 1. **Fetches** the new papers in the arXiv categories you chose.
 2. **Triages** every abstract against your research topics (a cheap, fast model).
@@ -153,19 +154,26 @@ launchctl kickstart -k gui/$(id -u)/local.research-agent.web
   language ("speculative decoding for long-context serving"). The agent scans the papers
   submitted in that range, fully reads the 60 most relevant at most, and writes a separate
   digest. Typical cost is $2–6.
-- **Run today's digest** starts the daily run now instead of waiting for 07:00.
+- **Run today's digest** starts the daily run now instead of waiting for 10 pm.
 - **Live status:** while a run is going, a bar at the top shows its stage, progress, cost
   so far and the latest log lines.
 - **Edit prompts:** opens `criteria.md` and `summary_format.md` in an editor. Saving
   checks the file the same way the agent reads it (categories, topics, sections), and
   refuses to save a file the agent couldn't use. The previous version is kept in
   `cache/prompt-backups/`. Changes apply from the next run. Cmd+S saves.
+- **Interrupted runs:** if the connection is lost mid-run (say the lid is closed on the
+  move), the agent retries for under a minute, then finishes the digest with what it has
+  and marks it **Incomplete**, with a note at the top saying what was skipped. While the
+  web app is running, it checks every 5 minutes for such a run from the last 3 days. Once
+  the model service is reachable again, it resumes that run: same papers, finished work
+  reused, only the skipped steps redone. The same applies to a run that died because the
+  Mac shut down. Each run is resumed at most 3 times. By hand: `scripts/run.sh --resume 2026-11-03`.
 - **Days with no papers:** arXiv publishes nothing on weekends and occasionally skips a
   weekday (a holiday or maintenance). Those runs show "No new papers" with the reason.
   Nothing is lost on a skipped weekday: the next run notices the gap and fetches any
   missed papers from the arXiv API.
 
-Only one run happens at a time; a second one waits for the first (a 07:00 run that finds
+Only one run happens at a time; a second one waits for the first (a 10 pm run that finds
 an ad-hoc run going waits for it rather than being skipped). The page only accepts
 requests from this Mac's own browser, so other websites can't start runs.
 
@@ -181,15 +189,23 @@ Check spending and recent runs:
 .venv/bin/python -m research_agent status
 ```
 
-Turn the weekday 07:00 schedule on or off:
+Turn the daily schedule (Sunday to Thursday at 10 pm) on or off:
 
 ```bash
 scripts/install_schedule.sh
 scripts/uninstall_schedule.sh
 ```
 
-If the Mac is asleep at 07:00, the run happens when it wakes. If it was off, the next run
-catches up on missed announcements (up to 7 days back).
+arXiv adds each new batch to its feed at midnight US Eastern (9 pm Pacific) on Sunday to
+Thursday evenings, so a 10 pm Pacific run picks it up. A Tuesday-night digest therefore
+holds the papers arXiv lists as Wednesday's. To use another time, edit `Hour`/`Minute` in
+`scheduling/research-agent.plist.template` and run `scripts/install_schedule.sh` again.
+
+If the Mac is asleep at 10 pm, the run happens when it wakes. If it was off, the next run
+catches up on missed announcements (up to 7 days back). While a run is going, it keeps
+the Mac from going to sleep on its own (with macOS's `caffeinate`). It can't stop the
+sleep that comes from closing the lid on battery. A run cut short that way is finished
+later (see "Interrupted runs" above).
 
 ## Costs
 
@@ -234,7 +250,7 @@ arXiv's [API terms of use](https://info.arxiv.org/help/api/tou.html) and
 - Only one run can happen at a time.
 
 The cost is speed: full-reading 30 papers takes about 8–15 minutes, mostly waiting.
-That's fine for an unattended morning job. The tests in `tests/` check the limiter
+That's fine for an unattended evening job. The tests in `tests/` check the limiter
 without contacting arXiv:
 
 ```bash

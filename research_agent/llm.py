@@ -8,13 +8,20 @@ import re
 import time
 
 import httpx
-from openai import APIError, OpenAI
+from openai import APIConnectionError, APIError, OpenAI
 
 log = logging.getLogger(__name__)
 
 
 class BudgetExceeded(Exception):
     pass
+
+
+# Waits after the model service can't be reached at all: enough to ride out a short
+# Wi-Fi blip. A longer outage (say, the lid closed on the move) isn't waited out: the run
+# finishes with what it has, is marked incomplete, and the web app resumes it once the
+# connection is back.
+CONNECTION_WAITS = [10, 30]
 
 
 class LLM:
@@ -30,6 +37,10 @@ class LLM:
         self.cfg = cfg
         self.store = store
         self.run_id = run_id
+        # Set once a call gave up on reaching the service. Later calls then try once each
+        # without waiting, so the run ends quickly with what it has.
+        self.offline = False
+        self.connection_failures = 0  # calls that failed because the service was unreachable
 
     # --- budget -------------------------------------------------------------
     def check_budget(self):
@@ -57,15 +68,27 @@ class LLM:
         if tool_choice:
             kwargs["tool_choice"] = tool_choice
 
-        for attempt in range(3):
+        attempt = 0
+        while True:
             try:
                 raw = self.client.chat.completions.with_raw_response.create(**kwargs)
+                self.offline = False
                 break
-            except APIError as e:
-                if attempt == 2:
+            except APIConnectionError as e:  # no answer at all, including timeouts
+                waits = [] if self.offline else CONNECTION_WAITS
+                if attempt >= len(waits):
+                    self.offline = True
+                    self.connection_failures += 1
+                    raise
+                log.warning("can't reach the model service (%s); retrying in %d s",
+                            e, waits[attempt])
+                time.sleep(waits[attempt])
+            except APIError as e:  # the service answered with an error
+                if attempt >= 2:
                     raise
                 log.warning("model call failed (%s), retrying", e)
                 time.sleep(5 * (attempt + 1))
+            attempt += 1
         resp = raw.parse()
 
         tin = resp.usage.prompt_tokens if resp.usage else 0

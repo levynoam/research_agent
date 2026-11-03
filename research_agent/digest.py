@@ -166,8 +166,12 @@ def _contents_table(ordered: list, columns: list[str], affiliations: dict) -> li
 
 
 def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, stats: dict,
-                 note: str | None = None) -> Path:
-    """Writes digests/<run id>.md and .html. stats: fetched, usd, scope (what was scanned)."""
+                 note: str | None = None, finish_hint: str | None = None) -> tuple[Path, bool]:
+    """Writes digests/<run id>.md and .html. stats: fetched, usd, scope (what was scanned).
+
+    finish_hint is added to the note when something was skipped. Returns
+    (path, overview_ok): overview_ok is False if the brief and top picks couldn't be written.
+    """
     opts = fmt.options
     layout = opts.get("layout") or DEFAULT_LAYOUT
     columns = opts.get("contents_columns") or ["paper", "topic", "score", "h_index",
@@ -182,6 +186,7 @@ def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, 
     rejected = [store.paper(r["id"]) for r in store.deepread_rows(run_id, relevant=False)]
 
     brief, picks, affiliations = "", [], {}
+    overview_ok = True
     if items:
         try:
             listing = [{"id": p["id"], "title": p["title"], "topics": s.get("topics"),
@@ -196,6 +201,13 @@ def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, 
             affiliations = out.get("affiliations") or {}
         except Exception as e:  # budget hit or model trouble: digest without the overview
             log.warning("digest overview skipped: %s", e)
+            overview_ok = False
+            missing = "The daily brief and top picks couldn't be written"
+            reason = (" because the model service couldn't be reached" if llm.offline
+                      else f" ({e})")
+            note = f"{note} {missing}{reason}." if note else f"{missing}{reason}."
+    if finish_hint and (not overview_ok or llm.connection_failures):
+        note = f"{note} {finish_hint}"
 
     # Each paper appears once, under its first matched topic.
     groups: dict[str, list] = {t: [] for t in criteria.topics}
@@ -250,4 +262,4 @@ def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, 
         f"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         f"<title>{html.escape(title)}</title><style>{CSS}</style></head>"
         f"<body>{body}</body></html>")
-    return md_path
+    return md_path, overview_ok

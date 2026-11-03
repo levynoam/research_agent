@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS runs (
     run_date TEXT PRIMARY KEY,                       -- the run id
     started TEXT, finished TEXT, status TEXT,
     n_fetched INTEGER, n_matched INTEGER, usd REAL, digest TEXT, last_announced TEXT,
-    kind TEXT, label TEXT, params TEXT, note TEXT
+    kind TEXT, label TEXT, params TEXT, note TEXT, incomplete INTEGER, resumes INTEGER
 );
 """
 
@@ -76,6 +76,9 @@ def _migrate(db):
     for col in ("kind", "label", "params", "note"):
         if col not in _columns(db, "runs"):
             db.execute(f"ALTER TABLE runs ADD COLUMN {col} TEXT")
+    for col in ("incomplete", "resumes"):
+        if col not in _columns(db, "runs"):
+            db.execute(f"ALTER TABLE runs ADD COLUMN {col} INTEGER")
     db.commit()
 
 
@@ -186,6 +189,10 @@ class Store:
         self.execute("INSERT OR IGNORE INTO runs (run_date) VALUES (?)", (run_id,))
         for k, v in fields.items():
             self.execute(f"UPDATE runs SET {k}=? WHERE run_date=?", (v, run_id))
+
+    def run(self, run_id: str) -> dict | None:
+        rows = self.query("SELECT * FROM runs WHERE run_date=?", (run_id,))
+        return dict(rows[0]) if rows else None
 
     def runs(self) -> list[dict]:
         return [dict(r) for r in self.query("SELECT * FROM runs ORDER BY started DESC")]

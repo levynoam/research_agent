@@ -6,12 +6,17 @@ Start it with scripts/web.sh (or install it to run at login: scripts/install_web
 
 import hashlib
 import json
+import logging
 import os
 import re
 import subprocess
 import tempfile
-from datetime import date, datetime
+import threading
+import time
+from datetime import date, datetime, timedelta
 from pathlib import Path
+
+import httpx
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -30,6 +35,10 @@ DIGESTS = ROOT / "digests"
 STATIC = ROOT / "research_agent" / "static"
 CATEGORY_RE = re.compile(r"^[a-z\-]+(\.[A-Za-z\-]+)?$")
 PROMPT_BACKUPS = ROOT / "cache" / "prompt-backups"
+RESUME_CHECK_S = 300     # how often to look for a cut-short run to finish
+RESUME_WITHIN_DAYS = 3   # older cut-short runs are left as they are
+MAX_AUTO_RESUMES = 3     # per run, so one that keeps failing isn't retried forever
+log = logging.getLogger("research_agent.web")
 MAX_PROMPT_BYTES = 200_000
 
 # The two files that steer the agent, editable from the web page. Each is checked with
@@ -286,10 +295,56 @@ def save_prompt(name: str, req: PromptSave):
     return {"version": _version(text), "summary": summary, "saved": True}
 
 
+# --- finishing runs that were cut short ------------------------------------------
+def _online(base_url: str) -> bool:
+    """Can the model service be reached? (No key is sent; any answer counts.)"""
+    try:
+        httpx.get(base_url.rstrip("/") + "/models", timeout=10)
+        return True
+    except httpx.HTTPError:
+        return False
+
+
+def resume_incomplete() -> str | None:
+    """Starts a recent run that was cut short again, once the model service is reachable.
+
+    Cut short means: it lost the connection (the Mac slept or went offline), or its
+    process died mid-run (the Mac shut down). The resumed run keeps its papers and
+    finished work and only does what was skipped. Returns the run id, if one was started.
+    """
+    if any(s.get("state") in ("queued", "running") for s in _statuses().values()):
+        return None
+    store = Store(ROOT / "state.db")
+    cutoff = (date.today() - timedelta(days=RESUME_WITHIN_DAYS)).isoformat()
+    todo = [r for r in store.runs()
+            if (r.get("incomplete") or r.get("status") == "running")  # running: died mid-run
+            and (r.get("resumes") or 0) < MAX_AUTO_RESUMES
+            and (r.get("started") or "") >= cutoff]
+    if not todo or not _online(load_config()["api"]["base_url"]):
+        return None
+    r = todo[0]
+    store.save_run(r["run_date"], resumes=(r.get("resumes") or 0) + 1)
+    log.warning("resuming run %s, which was cut short", r["run_date"])
+    _spawn(r["run_date"], r.get("kind") or "daily", r.get("label") or r["run_date"],
+           ["--resume", r["run_date"]])
+    return r["run_date"]
+
+
+def _resume_loop():
+    while True:
+        time.sleep(RESUME_CHECK_S)
+        try:
+            resume_incomplete()
+        except Exception:
+            log.exception("checking for runs to resume failed")
+
+
 def main():
     import uvicorn
 
     os.chdir(ROOT)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    threading.Thread(target=_resume_loop, daemon=True).start()
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
 
 

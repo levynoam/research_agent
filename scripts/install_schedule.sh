@@ -10,4 +10,4 @@ mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/logs"
 sed "s|__ROOT__|$ROOT|g" "$ROOT/scheduling/research-agent.plist.template" > "$TARGET"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$TARGET"
-echo "Daily run installed: weekdays at 07:00. Remove with scripts/uninstall_schedule.sh"
+echo "Daily run installed: Sunday to Thursday at 22:00. Remove with scripts/uninstall_schedule.sh"

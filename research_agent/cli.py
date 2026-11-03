@@ -14,6 +14,9 @@ import sys
 import time
 from dataclasses import replace
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from openai import APIConnectionError
 
 from research_agent import arxiv_http
 from research_agent.config import ROOT, load_config, load_criteria, load_format
@@ -88,10 +91,28 @@ def adhoc_criteria(criteria, focus: str, categories: list[str] | None):
     return criteria
 
 
+def _connection_lost(e: BaseException) -> bool:
+    while e is not None:
+        if isinstance(e, APIConnectionError):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
+
+
 def cmd_run(args):
     os.chdir(ROOT)
+    if args.resume:
+        # Finish an earlier run that was cut short: same papers, same settings.
+        row = Store(ROOT / "state.db").run(args.resume)
+        if not row:
+            raise SystemExit(f"no run {args.resume} to resume")
+        for k, v in json.loads(row.get("params") or "{}").items():
+            if getattr(args, k, None) in (None, False):
+                setattr(args, k, v)
     adhoc = bool(args.date_from)
-    if adhoc:
+    if args.resume:
+        run_id, label = args.resume, row.get("label") or args.resume
+    elif adhoc:
         d_from, d_to = date.fromisoformat(args.date_from), date.fromisoformat(args.date_to)
         if not d_from <= d_to <= date.today() or (d_to - d_from).days >= MAX_ADHOC_DAYS:
             raise SystemExit(f"--from/--to must be a range of at most {MAX_ADHOC_DAYS} days, "
@@ -111,20 +132,26 @@ def cmd_run(args):
         run_pipeline(args, run_id, kind, label, store, progress)
     except BaseException as e:
         progress.finish("failed", error=f"{type(e).__name__}: {e}")
-        store.save_run(run_id, status="failed", finished=datetime.now().isoformat(timespec="seconds"))
+        store.save_run(run_id, status="failed", finished=datetime.now().isoformat(timespec="seconds"),
+                       incomplete=1 if _connection_lost(e) else 0)
         raise
 
 
-def _no_papers_note(adhoc: bool) -> str:
+def _no_papers_note(adhoc: bool, announced: str | None = None) -> str:
     """Why a run found nothing, in words for the log and the web app."""
     if adhoc:
         return "No papers in these categories were submitted in this date range."
-    if date.today().weekday() >= 5:
+    if announced:
+        return (f"Nothing new since the last digest: arXiv's latest batch (announced "
+                f"{announced}) is already in an earlier digest. New batches come out Sunday "
+                "to Thursday at midnight US Eastern (9 pm Pacific).")
+    # arXiv's feed gets a new batch at midnight US Eastern, dated Monday to Friday, and
+    # is empty on Eastern Saturdays and Sundays, wherever the Mac happens to be.
+    if datetime.now(ZoneInfo("America/New_York")).weekday() >= 5:
         return "arXiv doesn't publish new papers on weekends."
-    # arXiv announces Sunday to Thursday evenings (US Eastern), so a weekday morning
-    # normally has a batch. An empty feed means arXiv skipped this announcement
-    # (a holiday or maintenance). Nothing is lost: if papers appear later, the next
-    # run sees the gap and fetches them from the arXiv API.
+    # A weekday with an empty feed means arXiv skipped this announcement (a holiday or
+    # maintenance). Nothing is lost: if papers appear later, the next run sees the gap
+    # and fetches them from the arXiv API.
     return ("arXiv published no new papers today (its feed is empty for all categories, "
             "usually a holiday or maintenance). The next run will pick up anything missed.")
 
@@ -139,16 +166,23 @@ def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progres
     scholar = Scholar(cfg)
     params = {k: getattr(args, k) for k in ("date_from", "date_to", "focus", "categories",
                                             "no_research", "no_images", "limit")}
-    store.save_run(run_id, started=datetime.now().isoformat(timespec="seconds"),
-                   status="running", kind=kind, label=label, params=json.dumps(params))
+    if args.resume:
+        store.save_run(run_id, status="running")
+    else:
+        store.save_run(run_id, started=datetime.now().isoformat(timespec="seconds"),
+                       status="running", kind=kind, label=label, params=json.dumps(params),
+                       resumes=0)
     note = None
     log.info("run %s (%s): categories %s, topics %s", run_id, kind, criteria.categories,
              criteria.topics)
 
     try:
-        # 1. Fetch
+        # 1. Fetch (a resumed run keeps the papers it already has)
         progress.stage("fetch")
-        if adhoc:
+        if args.resume:
+            papers, announced = [], store.run(run_id).get("last_announced")
+            log.info("resuming run %s: finishing the steps that were skipped", run_id)
+        elif adhoc:
             papers = fetch_api_window(criteria.categories, date.fromisoformat(args.date_from),
                                       date.fromisoformat(args.date_to))
             announced = None
@@ -164,7 +198,7 @@ def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progres
         fetched = store.count_for_run(run_id)
         store.save_run(run_id, n_fetched=fetched, last_announced=announced)
         if fetched == 0:
-            note = _no_papers_note(adhoc)
+            note = _no_papers_note(adhoc, announced)
             log.info("no papers: %s", note)
             store.save_run(run_id, status="ok", note=note,
                            finished=datetime.now().isoformat(timespec="seconds"))
@@ -196,8 +230,11 @@ def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progres
             progress.stage("enrich", total=len(relevant))
             for r in relevant:
                 if not store.load_json("enrich", r["id"]):
-                    store.save_json("enrich", r["id"],
-                                    enrich_paper(store.paper(r["id"]), cfg, scholar, llm))
+                    try:
+                        store.save_json("enrich", r["id"],
+                                        enrich_paper(store.paper(r["id"]), cfg, scholar, llm))
+                    except APIConnectionError as e:  # skipped now, done when resumed
+                        log.error("author lookup skipped for %s: %s", r["id"], e)
                 progress.advance()
 
         # 3b. Research agent on the very top papers
@@ -210,10 +247,13 @@ def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progres
                 if not store.load_json("research", r["id"]):
                     p = store.paper(r["id"])
                     progress.advance(0, detail=p["title"][:90])
-                    notes = research_paper(p, store.load_deepread(run_id, r["id"]),
-                                           store.load_json("enrich", r["id"]) or {},
-                                           criteria, cfg, llm, scholar)
-                    store.save_json("research", r["id"], notes)
+                    try:
+                        notes = research_paper(p, store.load_deepread(run_id, r["id"]),
+                                               store.load_json("enrich", r["id"]) or {},
+                                               criteria, cfg, llm, scholar)
+                        store.save_json("research", r["id"], notes)
+                    except APIConnectionError as e:  # skipped now, done when resumed
+                        log.error("research skipped for %s: %s", r["id"], e)
                 progress.advance()
 
         # 3c. One image per paper: a figure from the paper, or a generated illustration
@@ -236,6 +276,12 @@ def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progres
                    "from the abstract only.")
         note = f"{note} {blocked}" if note else blocked
 
+    if llm.connection_failures:
+        lost = (f"The model service couldn't be reached for part of this run (for example "
+                f"because the Mac went to sleep or lost its connection), so "
+                f"{llm.connection_failures} step(s) were skipped.")
+        note = f"{note} {lost}" if note else lost
+
     # 4. Digest (written even after a budget stop, from whatever finished)
     progress.stage("digest")
     if adhoc:
@@ -245,15 +291,20 @@ def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progres
     else:
         title = f"arXiv digest: {label}"
         scope = f"new papers scanned in {', '.join(criteria.categories)}"
-    path = write_digest(run_id, title, criteria, fmt, cfg, store, llm,
-                        {"fetched": store.count_for_run(run_id), "scope": scope,
-                         "usd": store.spend_for_run(run_id)}, note)
+    finish_hint = ("If the web app is running, it finishes this digest automatically once "
+                   "the connection is back, redoing only the skipped steps.")
+    path, overview_ok = write_digest(run_id, title, criteria, fmt, cfg, store, llm,
+                                     {"fetched": store.count_for_run(run_id), "scope": scope,
+                                      "usd": store.spend_for_run(run_id)}, note, finish_hint)
+    incomplete = bool(llm.connection_failures) or not overview_ok
     n_matched = len(store.deepread_rows(run_id, relevant=True))
     usd = store.spend_for_run(run_id)
     store.save_run(run_id, status="ok", finished=datetime.now().isoformat(timespec="seconds"),
-                   n_matched=n_matched, usd=usd, digest=str(path))
+                   n_matched=n_matched, usd=usd, digest=str(path),
+                   note="Incomplete: see the note at the top of the digest." if incomplete
+                   else None, incomplete=int(incomplete))
     progress.finish("done", digest=path.with_suffix(".html").name,
-                    detail=f"{n_matched} papers matched")
+                    detail=f"{n_matched} papers matched" + (" (incomplete)" if incomplete else ""))
     log.info("digest written: %s (%d papers, $%.2f)", path, n_matched, usd)
     if cfg["output"]["notify"]:
         what = "Ad-hoc digest" if adhoc else "arXiv digest"
@@ -285,6 +336,8 @@ def main():
     run.add_argument("--categories", help="ad-hoc: comma-separated arXiv categories "
                                           "(default: those in criteria.md)")
     run.add_argument("--run-id", help=argparse.SUPPRESS)  # set by the web app
+    run.add_argument("--resume", metavar="RUN_ID",
+                     help="finish an earlier run that was cut short (e.g. 2026-11-03)")
     run.add_argument("--limit", type=int, help="only process this many papers (for testing)")
     run.add_argument("--no-research", action="store_true", help="skip the web research agent")
     run.add_argument("--no-enrich", action="store_true", help="skip author/similar lookups")

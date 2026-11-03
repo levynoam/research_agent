@@ -12,4 +12,6 @@ for var in RESEARCH_AGENT_API_KEY SEMANTIC_SCHOLAR_API_KEY; do
   fi
 done
 
-exec .venv/bin/python -m research_agent run "$@"
+# caffeinate keeps the Mac from going to sleep on its own while the run is going.
+# (It can't stop sleep when the lid is closed on battery.)
+exec /usr/bin/caffeinate -i .venv/bin/python -m research_agent run "$@"
