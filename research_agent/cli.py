@@ -26,6 +26,7 @@ from research_agent.fetch import fetch_api_window, fetch_new
 from research_agent.figures import make_figures
 from research_agent.llm import LLM, BudgetExceeded
 from research_agent.progress import Progress
+from research_agent.refine import refine_criteria
 from research_agent.research import research_paper
 from research_agent.scholar import Scholar, enrich_paper
 from research_agent.store import Store
@@ -43,11 +44,11 @@ def notify(title: str, message: str):
     subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
 
 
-def setup_logging(run_id: str):
+def setup_logging(log_name: str):
     (ROOT / "logs").mkdir(exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%H:%M:%S")
     handlers = [logging.StreamHandler(sys.stdout),
-                logging.FileHandler(ROOT / "logs" / f"run-{run_id}.log")]
+                logging.FileHandler(ROOT / "logs" / f"{log_name}.log")]
     for h in handlers:
         h.setFormatter(fmt)
     logging.basicConfig(level=logging.INFO, handlers=handlers)
@@ -123,7 +124,7 @@ def cmd_run(args):
         run_id = date.today().isoformat()
         label = f"{date.today():%A %d %B %Y}"
     kind = "adhoc" if adhoc else "daily"
-    setup_logging(run_id)
+    setup_logging(f"run-{run_id}")
 
     store = Store(ROOT / "state.db")
     progress = Progress(run_id, kind, label, spend_fn=lambda: store.spend_for_run(run_id))
@@ -311,6 +312,45 @@ def run_pipeline(args, run_id: str, kind: str, label: str, store: Store, progres
         notify(f"{what} ready", f"{n_matched} papers matched (${usd:.2f})")
 
 
+def cmd_refine(args):
+    """Revises criteria.md from the +/- marks and message given on one digest."""
+    os.chdir(ROOT)
+    store = Store(ROOT / "state.db")
+    if not store.run(args.run):
+        raise SystemExit(f"no digest {args.run}")
+    rid = args.rid
+    if rid is None:  # started from the command line rather than the web app
+        marks = [v["verdict"] for v in store.feedback_for_run(args.run).values() if v["verdict"]]
+        if not marks and not args.message:
+            raise SystemExit("nothing to go on: mark papers in the digest or give --message")
+        rid = store.add_refinement(args.run, args.message or "", sum(v > 0 for v in marks),
+                                   sum(v < 0 for v in marks))
+        store.update_refinement(rid, pid=os.getpid())
+    setup_logging(f"refine-{rid}")
+    row = store.refinement(rid)
+    cfg = load_config()
+    spent = store.spend_for_run(args.run)
+    try:
+        out = refine_criteria(args.run, row["text"] or "", cfg, store, LLM(cfg, store, args.run))
+    except Exception as e:
+        store.update_refinement(rid, status="failed", error=f"{type(e).__name__}: {e}",
+                                usd=store.spend_for_run(args.run) - spent)
+        raise
+    store.update_refinement(rid, status="done" if out["changed"] else "unchanged",
+                            changes=json.dumps(out["changes"]), notes=out["notes"],
+                            backup=out["backup"], after_hash=out["after_hash"],
+                            diff=out["diff"], usd=store.spend_for_run(args.run) - spent)
+    if out["changed"]:
+        print("criteria.md revised:")
+        for c in out["changes"]:
+            print(f"  - {c}")
+        print(f"The previous version is in {out['backup']}.")
+    else:
+        print("criteria.md left as it is.")
+    if out["notes"]:
+        print(f"Notes: {out['notes']}")
+
+
 def cmd_status(args):
     os.chdir(ROOT)
     cfg = load_config()
@@ -349,6 +389,12 @@ def main():
     run.set_defaults(func=cmd_run)
     status = sub.add_parser("status", help="show spending and recent runs")
     status.set_defaults(func=cmd_status)
+    refine = sub.add_parser("refine", help="revise criteria.md from the feedback on a digest")
+    refine.add_argument("--run", required=True, metavar="RUN_ID",
+                        help="the digest the feedback was given on (e.g. 2026-11-05)")
+    refine.add_argument("--message", help="what to tell the agent, besides the +/- marks")
+    refine.add_argument("--rid", type=int, help=argparse.SUPPRESS)  # set by the web app
+    refine.set_defaults(func=cmd_refine)
     args = parser.parse_args()
     if args.command == "run" and bool(args.date_from) != bool(args.date_to):
         parser.error("--from and --to go together")

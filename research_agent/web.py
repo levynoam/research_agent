@@ -27,6 +27,7 @@ from research_agent.cli import MAX_ADHOC_DAYS
 from research_agent.config import (ROOT, ensure_from_template, load_config, load_criteria,
                                    load_format)
 from research_agent.progress import STATUS_DIR, read_status, write_status
+from research_agent.refine import undo_refinement
 from research_agent.store import Store
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("RESEARCH_AGENT_WEB_PORT", 8765))
@@ -112,6 +113,29 @@ def _spawn(run_id: str, kind: str, label: str, args: list[str]):
                           "stage": "queued", "stage_label": "Starting", "done": 0, "total": 0,
                           "detail": "", "usd": 0.0, "pid": proc.pid, "requested": now,
                           "started": now, "updated": now, "digest": None, "error": None})
+
+
+def _start_refinement(rid: int, run_id: str, store: Store):
+    (ROOT / "logs").mkdir(exist_ok=True)
+    out = open(ROOT / "logs" / f"refine-{rid}.out", "w")
+    proc = subprocess.Popen([str(ROOT / "scripts" / "agent.sh"), "refine", "--run", run_id,
+                             "--rid", str(rid)], cwd=ROOT, stdout=out,
+                            stderr=subprocess.STDOUT, start_new_session=True)
+    store.update_refinement(rid, pid=proc.pid)
+
+
+def _round_view(r: dict) -> dict:
+    """A refinement row as the page shows it; notices a process that died."""
+    r = dict(r)
+    if r["status"] == "running" and not _alive(r.get("pid")):
+        r["status"], r["error"] = "failed", "the process stopped unexpectedly"
+    r["changes"] = json.loads(r["changes"] or "[]")
+    r.pop("pid", None)
+    return r
+
+
+def _refining(store: Store) -> bool:
+    return any(r["status"] == "running" and _alive(r.get("pid")) for r in store.refinements())
 
 
 # --- pages and files ---------------------------------------------------------------
@@ -337,6 +361,75 @@ def _resume_loop():
             resume_incomplete()
         except Exception:
             log.exception("checking for runs to resume failed")
+
+
+# --- reader feedback on a digest, and the criteria refinement it drives -------------
+class Verdict(BaseModel):
+    id: str
+    verdict: int       # 1 relevant, -1 not relevant, 0 cleared
+    note: str = ""
+
+
+class RefineRequest(BaseModel):
+    text: str = ""
+
+
+@app.get("/api/feedback/{run_id}")
+def feedback(run_id: str):
+    store = Store(ROOT / "state.db")
+    if not store.run(run_id):
+        raise HTTPException(404, "Unknown digest.")
+    return {"verdicts": store.feedback_for_run(run_id),
+            "rounds": [_round_view(r) for r in store.refinements(run_id)],
+            "busy": _refining(store)}
+
+
+@app.post("/api/feedback/{run_id}")
+def save_feedback(run_id: str, req: Verdict):
+    store = Store(ROOT / "state.db")
+    if not store.query("SELECT 1 FROM run_papers WHERE run_id=? AND id=?", (run_id, req.id)):
+        raise HTTPException(404, "That paper isn't in this digest.")
+    if req.verdict not in (-1, 0, 1):
+        raise HTTPException(400, "verdict must be 1, -1 or 0")
+    store.save_feedback(run_id, req.id, req.verdict, " ".join(req.note.split())[:500])
+    return {"ok": True}
+
+
+@app.post("/api/feedback/{run_id}/refine")
+def start_refine(run_id: str, req: RefineRequest):
+    store = Store(ROOT / "state.db")
+    if not store.run(run_id):
+        raise HTTPException(404, "Unknown digest.")
+    text = req.text.strip()[:4000]
+    marks = [v["verdict"] for v in store.feedback_for_run(run_id).values() if v["verdict"]]
+    if not marks and not text:
+        raise HTTPException(400, "Mark at least one paper in the digest, or write a message.")
+    if _refining(store):
+        raise HTTPException(409, "The previous round is still being applied.")
+    rid = store.add_refinement(run_id, text, sum(v > 0 for v in marks), sum(v < 0 for v in marks))
+    _start_refinement(rid, run_id, store)
+    return {"rid": rid}
+
+
+@app.get("/api/refinements/{rid}")
+def refinement(rid: int):
+    row = Store(ROOT / "state.db").refinement(rid)
+    if not row:
+        raise HTTPException(404, "Unknown round.")
+    return _round_view(row)
+
+
+@app.post("/api/refinements/{rid}/undo")
+def undo(rid: int):
+    store = Store(ROOT / "state.db")
+    row = store.refinement(rid)
+    if not row:
+        raise HTTPException(404, "Unknown round.")
+    problem = undo_refinement(row)
+    if problem:
+        raise HTTPException(409, problem)
+    store.update_refinement(rid, status="undone")
+    return {"ok": True}
 
 
 def main():

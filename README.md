@@ -157,6 +157,19 @@ launchctl kickstart -k gui/$(id -u)/local.research-agent.web
 - **Run today's digest** starts the daily run now instead of waiting for 10 pm.
 - **Live status:** while a run is going, a bar at the top shows its stage, progress, cost
   so far and the latest log lines.
+- **Feedback:** every paper in a digest has **+** (relevant, more like this) and **−** (not
+  relevant, fewer like this) buttons, with an optional one-line "why"; papers under
+  "Screened out" have a "should have been in" button. The **Feedback** button opens a box
+  for a message. Sending asks a strong model (`models.refine`, Opus by default) to revise
+  `criteria.md` so that future runs would agree with your marks: it adds examples and
+  sharpens include/exclude lines, keeping your wording and structure, and never touches the
+  categories. The previous file goes to `cache/prompt-backups/`, the dialog shows the exact
+  change, and **Undo** puts the old file back. A round takes under a minute and usually costs
+  a few cents. The next run uses the new file. Earlier rounds are shown to the model so it
+  doesn't undo them. From the command line:
+  `scripts/agent.sh refine --run 2026-11-05 --message "fewer training papers"`.
+  Digests made before this feature have no buttons; `scripts/run.sh --resume <run id>`
+  rewrites one with them (it only redoes the daily brief, a few cents).
 - **Edit prompts:** opens `criteria.md` and `summary_format.md` in an editor. Saving
   checks the file the same way the agent reads it (categories, topics, sections), and
   refuses to save a file the agent couldn't use. The previous version is kept in
@@ -226,7 +239,7 @@ summary_format.md      how summaries and the digest look (yours, not tracked by 
 config.yaml            technical settings
 research_agent/        the code: fetch, triage, deepread, scholar, research, digest, cli, web
 research_agent/static/ the web app's page, script and styles
-scripts/               run.sh and the schedule install/uninstall scripts
+scripts/               run.sh, agent.sh (any command with keys loaded), install scripts
 scheduling/            the macOS schedule definition (template)
 digests/               daily outputs (not tracked by git)
 logs/                  run logs (not tracked by git)

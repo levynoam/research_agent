@@ -53,7 +53,71 @@ display:block;background:#fff;border:1px solid #ddd;border-radius:6px;padding:6p
 figure.paper-fig figcaption{font-size:.88em;color:#666;margin-top:.4em}
 table{border-collapse:collapse;font-size:.88em;width:100%;display:block;overflow-x:auto}
 th,td{border-bottom:1px solid #ddd;padding:.35em .5em;text-align:left;vertical-align:top}
-th{white-space:nowrap}@media (prefers-color-scheme:dark){th,td{border-color:#444}}"""
+th{white-space:nowrap}@media (prefers-color-scheme:dark){th,td{border-color:#444}}
+.fb{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;margin-left:6px}
+.fb button{font:inherit;font-size:.85em;line-height:1;padding:3px 7px;border-radius:999px;
+border:1px solid #ccc;background:transparent;color:#888;cursor:pointer;opacity:.75}
+.fb button:hover{opacity:1;border-color:#888}
+.fb button.on{opacity:1;color:#fff}.fb button.on.up{background:#1f8a4c;border-color:#1f8a4c}
+.fb button.on.down{background:#c2362b;border-color:#c2362b}
+.fb input{font:inherit;font-size:.82em;padding:2px 6px;border:1px solid #ccc;border-radius:5px;
+background:transparent;color:inherit;width:16em}
+.fb button.clear{border-color:transparent;padding:3px 4px}
+.fb-sm button{padding:1px 5px;font-size:.8em}
+@media (prefers-color-scheme:dark){.fb button,.fb input{border-color:#555}}"""
+
+# Runs inside the digest page when it is served by the web app: draws the 👍/👎 buttons
+# and saves verdicts. Opened as a plain file, the buttons simply don't appear.
+FEEDBACK_JS = """
+(async () => {
+  const RUN = __RUN__;
+  const spots = [...document.querySelectorAll(".fb[data-id]")];
+  const giveUp = () => spots.forEach((s) => s.remove());
+  if (!spots.length || location.protocol === "file:") return giveUp();
+  const url = "/api/feedback/" + encodeURIComponent(RUN);
+  let verdicts;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error();
+    verdicts = (await r.json()).verdicts || {};
+  } catch (e) { return giveUp(); }
+
+  const save = async (id, verdict, note) => {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                                 body: JSON.stringify({ id, verdict, note }) });
+    if (!r.ok) { alert("Could not save the feedback. Is the web app running?"); return; }
+    verdicts[id] = { verdict, note };
+    render(id);
+  };
+  const current = (id) => verdicts[id] || { verdict: 0, note: "" };
+  const render = (id) => spots.filter((s) => s.dataset.id === id).forEach((s) => draw(s));
+
+  const draw = (spot) => {
+    const id = spot.dataset.id, out = spot.classList.contains("fb-out");
+    const small = spot.classList.contains("fb-sm"), { verdict, note } = current(id);
+    spot.replaceChildren();
+    const button = (v, cls, text, title) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = cls + (verdict === v ? " on" : "");
+      b.title = verdict === v ? "Press again to clear this mark" : title;
+      b.textContent = text;
+      b.onclick = () => save(id, verdict === v ? 0 : v, note);
+      spot.appendChild(b);
+    };
+    button(1, "up", out ? "+ should have been in" : "+",
+           out ? "This paper should have been included" : "Relevant: more like this");
+    if (!out) button(-1, "down", "\u2212", "Not relevant: fewer like this");
+    if (verdict) button(0, "clear", "\u00d7", "Clear this mark");
+    if (verdict && !small) {
+      const input = document.createElement("input");
+      input.placeholder = "why? (optional)"; input.value = note || "";
+      input.onchange = () => save(id, verdict, input.value.trim());
+      spot.appendChild(input);
+    }
+  };
+  spots.forEach(draw);
+})();
+"""
 
 
 def _authors_line(authors: list[str]) -> str:
@@ -91,7 +155,8 @@ def _render_paper(p: dict, s: dict, e: dict | None, r: dict | None, fig: dict | 
     meta = [_authors_line(p["authors"]), f"arXiv:{p['id']}", f"score {s.get('score')}/10"]
     if s.get("code_url"):
         meta.append(f"[code]({s['code_url']})")
-    lines.append(f"<span class=\"meta\">{' · '.join(meta)}</span>\n")
+    lines.append(f"<span class=\"meta\">{' · '.join(meta)}</span>"
+                 f"<span class=\"fb\" data-id=\"{p['id']}\"></span>\n")
     lines.append(f"**TL;DR** {s.get('tldr', '')}\n")
     if opts.get("show_figures", True):
         lines.append(_render_figure(fig))
@@ -149,7 +214,8 @@ def _contents_table(ordered: list, columns: list[str], affiliations: dict) -> li
             "|---|" + "---|" * len(columns)]
     for i, (p, s, e, _r, _f) in enumerate(ordered, 1):
         values = {
-            "paper": f"[{_cell(p['title'])}](#p-{p['id']})",
+            "paper": f"[{_cell(p['title'])}](#p-{p['id']}) "
+                     f"<span class=\"fb fb-sm\" data-id=\"{p['id']}\"></span>",
             "topic": _cell((s.get("topics") or ["Other"])[0]),
             "score": s.get("score", ""),
             "h_index": _avg_h_index(e),
@@ -237,8 +303,9 @@ def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, 
         blocks["screened_out"] = [
             "## Screened out after full read",
             "These looked relevant from the abstract but not from the full text. "
-            "If any should have made it, add them to criteria.md as examples.\n"
-        ] + [f"- [{r['title']}]({r['url']})" for r in rejected]
+            "If any should have made it, mark it and send feedback.\n"
+        ] + [f"- [{r['title']}]({r['url']}) <span class=\"fb fb-out\" data-id=\"{r['id']}\">"
+             "</span>" for r in rejected]
 
     md = [f"# {title}",
           f"<span class=\"meta\">{stats.get('fetched', 0)} {stats.get('scope', 'papers')} · "
@@ -261,5 +328,6 @@ def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, 
         f"<!doctype html><html><head><meta charset=\"utf-8\">"
         f"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         f"<title>{html.escape(title)}</title><style>{CSS}</style></head>"
-        f"<body>{body}</body></html>")
+        f"<body>{body}<script>{FEEDBACK_JS.replace('__RUN__', json.dumps(run_id))}"
+        f"</script></body></html>")
     return md_path, overview_ok

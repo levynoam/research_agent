@@ -13,6 +13,7 @@ models:
   digest: azure/anthropic/eccn-claude-sonnet-5-5    # writes the daily overview
   figures: azure/anthropic/eccn-claude-sonnet-5-5   # picks figures, checks generated images
   authors: azure/anthropic/eccn-claude-haiku-5-5    # reads author names and affiliations
+  refine: azure/anthropic/eccn-claude-opus-5-5      # turns your feedback into a better criteria.md
 
 # Fallback prices (USD per 1M tokens), used only if the Hub doesn't report a cost.
 # The Hub normally reports the exact cost of every call, and that is what gets logged.

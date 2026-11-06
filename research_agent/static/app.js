@@ -89,6 +89,7 @@ function showRun(id, { keepFrame = false } = {}) {
   const frame = $("#frame"), empty = $("#empty"), open = $("#open-tab");
   $("#viewer-title").textContent = r ? r.label : "Pick a digest";
   $("#viewer-meta").textContent = r ? (r.kind === "adhoc" ? "Ad-hoc digest · " : "Daily digest · ") + runMeta(r) : "";
+  const fbButton = $("#feedback-btn");
   if (r && r.digest) {
     const src = `${r.digest}?v=${encodeURIComponent(r.usd)}`;
     if (!keepFrame || !frame.src.includes(r.digest)) frame.src = src;
@@ -96,10 +97,12 @@ function showRun(id, { keepFrame = false } = {}) {
     empty.hidden = true;
     open.href = r.digest;
     open.hidden = false;
+    fbButton.hidden = r.state !== "done";
   } else {
     frame.hidden = true;
     empty.hidden = false;
     open.hidden = true;
+    fbButton.hidden = true;
     empty.innerHTML = r && (r.state === "running" || r.state === "queued")
       ? `<p>This digest is still being made.</p><p class="muted">Progress is shown above.</p>`
       : r && r.note
@@ -388,6 +391,111 @@ $("#prompts-dialog").addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "s") {
     e.preventDefault();
     if (isDirty(prompts.current)) savePrompt();
+  }
+});
+
+// --- feedback: +/- marks in the digest drive a revision of criteria.md -------------------
+const feedback = { runId: null, timer: null };
+
+function roundStatus(r) {
+  return { running: "Being applied…", done: "Applied", unchanged: "No change needed",
+           undone: "Undone", failed: "Failed" }[r.status] || r.status;
+}
+
+function renderRounds(rounds) {
+  $("#feedback-rounds").innerHTML = rounds.length ? `<h3>Rounds on this digest</h3>` + rounds.map((r) => `
+    <div class="round ${r.status}">
+      <div class="round-head"><b>${escapeHtml(r.created.replace("T", " "))}</b>
+        · ${roundStatus(r)}${r.usd ? ` · $${r.usd.toFixed(2)}` : ""}
+        <span class="muted">· ${r.n_pos} marked +, ${r.n_neg} marked −${r.text ? ", with a message" : ""}</span>
+        ${r.status === "done" ? `<button type="button" class="btn small" data-undo="${r.rid}">Undo</button>` : ""}
+      </div>
+      ${r.status === "running" ? `<div class="bar indeterminate"><div></div></div>` : ""}
+      ${r.changes.length ? `<ul>${r.changes.map((c) => `<li>${escapeHtml(c)}</li>`).join("")}</ul>` : ""}
+      ${r.notes ? `<p class="muted">${escapeHtml(r.notes)}</p>` : ""}
+      ${r.error ? `<p class="form-error">${escapeHtml(r.error)}</p>` : ""}
+      ${r.diff ? `<details><summary>Show the change to criteria.md</summary><pre>${escapeHtml(r.diff)}</pre></details>` : ""}
+    </div>`).join("") : "";
+}
+
+async function loadFeedback() {
+  const data = await api(`/api/feedback/${encodeURIComponent(feedback.runId)}`);
+  const marks = Object.values(data.verdicts);
+  const pos = marks.filter((v) => v.verdict > 0).length, neg = marks.filter((v) => v.verdict < 0).length;
+  $("#feedback-counts").textContent = pos || neg
+    ? `${pos} paper${pos === 1 ? "" : "s"} marked +, ${neg} marked − in this digest.`
+    : "No papers marked yet. Use the + / − buttons next to each paper in the digest " +
+      "(and “should have been in” under Screened out), or just write a message.";
+  $("#submit-feedback").disabled = data.busy;
+  $("#submit-feedback").textContent = data.busy ? "Applying a round…" : "Send feedback";
+  renderRounds(data.rounds);
+  if (data.rounds.some((r) => r.status === "running")) watchRefinement();
+}
+
+async function openFeedback() {
+  feedback.runId = state.selected;
+  $("#feedback-error").hidden = true;
+  try {
+    await loadFeedback();
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  $("#feedback-dialog").showModal();
+}
+
+function watchRefinement() {
+  clearTimeout(feedback.timer);
+  feedback.timer = setTimeout(async () => {
+    try {
+      const data = await api(`/api/feedback/${encodeURIComponent(feedback.runId)}`);
+      if (data.rounds.some((r) => r.status === "running")) return watchRefinement();
+      const last = data.rounds[0];
+      if (last) {
+        toast(last.status === "done" ? "criteria.md revised from your feedback"
+              : last.status === "unchanged" ? "Feedback noted; criteria.md didn't need a change"
+              : "The feedback round failed");
+      }
+      if ($("#feedback-dialog").open) await loadFeedback();
+      loadOverview();
+    } catch (e) {
+      console.error(e);
+    }
+  }, 2500);
+}
+
+async function submitFeedback(event) {
+  event.preventDefault();
+  const form = $("#feedback-form"), button = $("#submit-feedback");
+  button.disabled = true;
+  try {
+    await api(`/api/feedback/${encodeURIComponent(feedback.runId)}/refine`, {
+      method: "POST", body: JSON.stringify({ text: form.text.value }),
+    });
+    form.text.value = "";
+    $("#feedback-error").hidden = true;
+    await loadFeedback();
+  } catch (e) {
+    $("#feedback-error").textContent = e.message;
+    $("#feedback-error").hidden = false;
+    button.disabled = false;
+  }
+}
+
+$("#feedback-btn").addEventListener("click", openFeedback);
+$("#cancel-feedback").addEventListener("click", () => $("#feedback-dialog").close());
+$("#feedback-form").addEventListener("submit", submitFeedback);
+$("#feedback-rounds").addEventListener("click", async (e) => {
+  const button = e.target.closest("[data-undo]");
+  if (!button) return;
+  if (!confirm("Put the previous criteria.md back?")) return;
+  try {
+    await api(`/api/refinements/${button.dataset.undo}/undo`, { method: "POST" });
+    toast("criteria.md restored");
+    await loadFeedback();
+  } catch (err) {
+    $("#feedback-error").textContent = err.message;
+    $("#feedback-error").hidden = false;
   }
 });
 

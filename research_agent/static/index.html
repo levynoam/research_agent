@@ -38,7 +38,10 @@
           <div id="viewer-title" class="viewer-title">Pick a digest</div>
           <div id="viewer-meta" class="viewer-meta"></div>
         </div>
-        <a id="open-tab" class="btn small" target="_blank" rel="noopener" hidden>Open in new tab ↗</a>
+        <div class="actions">
+          <button class="btn small primary" id="feedback-btn" hidden>Feedback</button>
+          <a id="open-tab" class="btn small" target="_blank" rel="noopener" hidden>Open in new tab ↗</a>
+        </div>
       </div>
       <iframe id="frame" title="Digest" hidden></iframe>
       <div id="empty" class="empty">
@@ -101,6 +104,26 @@
         <button type="button" class="btn primary" id="prompt-save">Save</button>
       </div>
     </div>
+  </dialog>
+
+  <dialog id="feedback-dialog" class="feedback-dialog">
+    <form id="feedback-form" method="dialog">
+      <h2>Feedback on this digest</h2>
+      <p class="muted" id="feedback-counts"></p>
+      <label><span>Message <span class="muted">(optional)</span></span>
+        <textarea name="text" rows="4" maxlength="4000"
+          placeholder="Explain your marks, or anything else the agent should learn. For example: “the two KV-cache papers were about training, not serving”."></textarea>
+      </label>
+      <p class="estimate">Sending asks a strong model to revise <code>criteria.md</code> from your
+        marks and message, so future digests follow them. The previous file is kept and the
+        change can be undone. A round takes under a minute and usually costs a few cents.</p>
+      <p id="feedback-error" class="form-error" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="cancel-feedback">Close</button>
+        <button type="submit" class="btn primary" id="submit-feedback">Send feedback</button>
+      </div>
+      <div id="feedback-rounds" class="rounds"></div>
+    </form>
   </dialog>
 
   <div id="toast" class="toast" hidden></div>

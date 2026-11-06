@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS runs (
     n_fetched INTEGER, n_matched INTEGER, usd REAL, digest TEXT, last_announced TEXT,
     kind TEXT, label TEXT, params TEXT, note TEXT, incomplete INTEGER, resumes INTEGER
 );
+CREATE TABLE IF NOT EXISTS feedback (          -- the reader's verdict on a digest entry
+    run_id TEXT, id TEXT, verdict INTEGER,       -- 1 relevant, -1 not relevant, 0 cleared
+    note TEXT, ts TEXT, PRIMARY KEY (run_id, id)
+);
+CREATE TABLE IF NOT EXISTS refinements (       -- rounds of feedback applied to criteria.md
+    rid INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, created TEXT, status TEXT,
+    text TEXT, n_pos INTEGER, n_neg INTEGER,     -- what the reader sent
+    backup TEXT, after_hash TEXT,                -- the file before, and a hash of it after
+    changes TEXT, notes TEXT, diff TEXT, usd REAL, error TEXT, pid INTEGER
+);
 """
 
 
@@ -79,6 +89,8 @@ def _migrate(db):
     for col in ("incomplete", "resumes"):
         if col not in _columns(db, "runs"):
             db.execute(f"ALTER TABLE runs ADD COLUMN {col} INTEGER")
+    if "pid" not in _columns(db, "refinements"):
+        db.execute("ALTER TABLE refinements ADD COLUMN pid INTEGER")
     db.commit()
 
 
@@ -196,3 +208,38 @@ class Store:
 
     def runs(self) -> list[dict]:
         return [dict(r) for r in self.query("SELECT * FROM runs ORDER BY started DESC")]
+
+    # --- reader feedback ------------------------------------------------------
+    def save_feedback(self, run_id: str, pid: str, verdict: int, note: str):
+        self.execute("INSERT OR REPLACE INTO feedback VALUES (?,?,?,?,?)",
+                     (run_id, pid, verdict, note, datetime.now().isoformat(timespec="seconds")))
+
+    def feedback_for_run(self, run_id: str) -> dict[str, dict]:
+        rows = self.query("SELECT id, verdict, note FROM feedback WHERE run_id=?", (run_id,))
+        return {r["id"]: {"verdict": r["verdict"], "note": r["note"] or ""} for r in rows}
+
+    def add_refinement(self, run_id: str, text: str, n_pos: int, n_neg: int) -> int:
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT INTO refinements (run_id, created, status, text, n_pos, n_neg) "
+                "VALUES (?,?,?,?,?,?)",
+                (run_id, datetime.now().isoformat(timespec="seconds"), "running", text,
+                 n_pos, n_neg))
+            self.db.commit()
+            return cur.lastrowid
+
+    def update_refinement(self, rid: int, **fields):
+        for k, v in fields.items():
+            self.execute(f"UPDATE refinements SET {k}=? WHERE rid=?", (v, rid))
+
+    def refinement(self, rid: int) -> dict | None:
+        rows = self.query("SELECT * FROM refinements WHERE rid=?", (rid,))
+        return dict(rows[0]) if rows else None
+
+    def refinements(self, run_id: str | None = None, limit: int = 20) -> list[dict]:
+        if run_id:
+            rows = self.query("SELECT * FROM refinements WHERE run_id=? ORDER BY rid DESC "
+                              "LIMIT ?", (run_id, limit))
+        else:
+            rows = self.query("SELECT * FROM refinements ORDER BY rid DESC LIMIT ?", (limit,))
+        return [dict(r) for r in rows]
