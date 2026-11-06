@@ -220,6 +220,27 @@ class Store:
     def runs(self) -> list[dict]:
         return [dict(r) for r in self.query("SELECT * FROM runs ORDER BY started DESC")]
 
+    def delete_run(self, run_id: str) -> list[str]:
+        """Forgets a run: its judgments, marks and the papers no other run has.
+
+        Returns the ids of the papers that were removed. Papers that also appear in another
+        run stay, with their shared notes and images. Spend and criteria rounds are kept.
+        A daily run deleted this way is fetched again by the next daily run (its papers are
+        no longer known, and the feed position moves back to the previous run).
+        """
+        only_here = [r["id"] for r in self.query(
+            "SELECT id FROM run_papers WHERE run_id=? AND id NOT IN "
+            "(SELECT id FROM run_papers WHERE run_id != ?)", (run_id, run_id))]
+        with self.lock:
+            for pid in only_here:
+                for table in ("papers", "enrich", "research", "figures"):
+                    self.db.execute(f"DELETE FROM {table} WHERE id=?", (pid,))
+            for table in ("run_papers", "triage", "deepread", "feedback"):
+                self.db.execute(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
+            self.db.execute("DELETE FROM runs WHERE run_date=?", (run_id,))
+            self.db.commit()
+        return only_here
+
     # --- reader feedback ------------------------------------------------------
     def save_feedback(self, run_id: str, pid: str, verdict: int, note: str):
         """Records a mark as pending: it will go with the next round of feedback."""

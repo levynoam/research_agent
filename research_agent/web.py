@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -188,6 +189,23 @@ def runs():
         })
     out.sort(key=lambda x: x["started"] or "", reverse=True)
     return out
+
+
+@app.delete("/api/runs/{run_id}")
+def delete_run(run_id: str):
+    """Removes a digest: its files, its row in the list and what the database holds on it."""
+    store = Store(ROOT / "state.db")
+    s = _statuses().get(run_id)
+    if s and s.get("state") in ("queued", "running"):
+        raise HTTPException(409, "This digest is still being made. Wait for it to finish.")
+    if not store.run(run_id) and not s:
+        raise HTTPException(404, "Unknown digest.")
+    removed = store.delete_run(run_id)
+    for path in (DIGESTS / f"{run_id}.md", DIGESTS / f"{run_id}.html", STATUS_DIR / f"{run_id}.json"):
+        path.unlink(missing_ok=True)
+    shutil.rmtree(DIGESTS / "images" / run_id, ignore_errors=True)
+    log.info("digest %s deleted (%d papers forgotten with it)", run_id, len(removed))
+    return {"ok": True}
 
 
 @app.get("/api/status")

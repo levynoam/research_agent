@@ -171,6 +171,10 @@ launchctl kickstart -k gui/$(id -u)/local.research-agent.web
   `scripts/agent.sh refine --run 2026-11-05 --message "fewer training papers"`.
   Digests made before this feature have no buttons; `scripts/run.sh --resume <run id>`
   rewrites one with them (it only redoes the daily brief, a few cents).
+- **Delete:** removes the selected digest (its files, and what the database remembers of
+  the run), with no confirmation. Papers that no other digest holds are forgotten too, so a
+  deleted daily digest is made again by the next daily run; a deleted ad-hoc one is simply
+  gone. Spend records and earlier feedback rounds are kept.
 - **Edit prompts:** opens `criteria.md` and `summary_format.md` in an editor. Saving
   checks the file the same way the agent reads it (categories, topics, sections), and
   refuses to save a file the agent couldn't use. The previous version is kept in

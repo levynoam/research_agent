@@ -84,12 +84,13 @@ async function loadRuns() {
 function showRun(id, { keepFrame = false } = {}) {
   const r = state.runs.find((x) => x.id === id);
   state.selected = id;
-  history.replaceState(null, "", `#run=${encodeURIComponent(id)}`);
+  history.replaceState(null, "", id ? `#run=${encodeURIComponent(id)}` : location.pathname);
   renderRuns();
   const frame = $("#frame"), empty = $("#empty"), open = $("#open-tab");
   $("#viewer-title").textContent = r ? r.label : "Pick a digest";
   $("#viewer-meta").textContent = r ? (r.kind === "adhoc" ? "Ad-hoc digest · " : "Daily digest · ") + runMeta(r) : "";
   const fbButton = $("#feedback-btn");
+  $("#delete-btn").hidden = !r || ["running", "queued"].includes(r.state);
   if (r && r.digest) {
     const src = `${r.digest}?v=${encodeURIComponent(r.usd)}`;
     if (!keepFrame || !frame.src.includes(r.digest)) frame.src = src;
@@ -494,6 +495,28 @@ async function submitFeedback(event) {
   }
 }
 
+// --- deleting a digest ---------------------------------------------------------------
+async function deleteRun() {
+  const id = state.selected, r = state.runs.find((x) => x.id === id);
+  if (!id) return;
+  const button = $("#delete-btn");
+  button.disabled = true;
+  try {
+    await api(`/api/runs/${encodeURIComponent(id)}`, { method: "DELETE" });
+    state.selected = null;
+    $("#frame").hidden = true;
+    $("#frame").removeAttribute("src");
+    toast(`Deleted ${r ? r.label : id}`);
+    await Promise.all([loadRuns(), loadOverview()]);
+    showRun(null);
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("#delete-btn").addEventListener("click", deleteRun);
 $("#feedback-btn").addEventListener("click", openFeedback);
 $("#cancel-feedback").addEventListener("click", () => $("#feedback-dialog").close());
 $("#feedback-form").addEventListener("submit", submitFeedback);
