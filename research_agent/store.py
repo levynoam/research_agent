@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE TABLE IF NOT EXISTS feedback (          -- the reader's verdict on a digest entry
     run_id TEXT, id TEXT, verdict INTEGER,       -- 1 relevant, -1 not relevant, 0 cleared
-    note TEXT, ts TEXT, PRIMARY KEY (run_id, id)
+    note TEXT, ts TEXT, rid INTEGER,             -- rid: the round it was sent in (NULL: not yet)
+    PRIMARY KEY (run_id, id)
 );
 CREATE TABLE IF NOT EXISTS refinements (       -- rounds of feedback applied to criteria.md
     rid INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, created TEXT, status TEXT,
@@ -58,6 +59,13 @@ CREATE TABLE IF NOT EXISTS refinements (       -- rounds of feedback applied to 
     backup TEXT, after_hash TEXT,                -- the file before, and a hash of it after
     changes TEXT, notes TEXT, diff TEXT, usd REAL, error TEXT, pid INTEGER
 );
+"""
+
+
+BACKFILL_ROUNDS = """
+UPDATE feedback SET rid = (SELECT min(r.rid) FROM refinements r
+                           WHERE r.run_id = feedback.run_id AND r.created >= feedback.ts)
+WHERE rid IS NULL
 """
 
 
@@ -91,6 +99,9 @@ def _migrate(db):
             db.execute(f"ALTER TABLE runs ADD COLUMN {col} INTEGER")
     if "pid" not in _columns(db, "refinements"):
         db.execute("ALTER TABLE refinements ADD COLUMN pid INTEGER")
+    if "rid" not in _columns(db, "feedback"):
+        db.execute("ALTER TABLE feedback ADD COLUMN rid INTEGER")
+        db.execute(BACKFILL_ROUNDS)  # marks made before a round were sent in it
     db.commit()
 
 
@@ -211,12 +222,30 @@ class Store:
 
     # --- reader feedback ------------------------------------------------------
     def save_feedback(self, run_id: str, pid: str, verdict: int, note: str):
-        self.execute("INSERT OR REPLACE INTO feedback VALUES (?,?,?,?,?)",
+        """Records a mark as pending: it will go with the next round of feedback."""
+        self.execute("INSERT OR REPLACE INTO feedback (run_id, id, verdict, note, ts, rid) "
+                     "VALUES (?,?,?,?,?,NULL)",
                      (run_id, pid, verdict, note, datetime.now().isoformat(timespec="seconds")))
 
-    def feedback_for_run(self, run_id: str) -> dict[str, dict]:
-        rows = self.query("SELECT id, verdict, note FROM feedback WHERE run_id=?", (run_id,))
+    def feedback_for_run(self, run_id: str, rid: int | None = None) -> dict[str, dict]:
+        """The pending marks on a digest, or (with rid) the marks sent in that round."""
+        if rid is None:
+            rows = self.query("SELECT id, verdict, note FROM feedback WHERE run_id=? "
+                              "AND rid IS NULL", (run_id,))
+        else:
+            rows = self.query("SELECT id, verdict, note FROM feedback WHERE run_id=? AND rid=?",
+                              (run_id, rid))
         return {r["id"]: {"verdict": r["verdict"], "note": r["note"] or ""} for r in rows}
+
+    def claim_feedback(self, run_id: str, rid: int):
+        """Moves the pending marks into round rid, so the digest starts clean again."""
+        self.execute("DELETE FROM feedback WHERE run_id=? AND rid IS NULL AND verdict=0",
+                     (run_id,))
+        self.execute("UPDATE feedback SET rid=? WHERE run_id=? AND rid IS NULL", (rid, run_id))
+
+    def release_feedback(self, rid: int):
+        """Makes the marks of a failed round pending again, so they aren't lost."""
+        self.execute("UPDATE feedback SET rid=NULL WHERE rid=?", (rid,))
 
     def add_refinement(self, run_id: str, text: str, n_pos: int, n_neg: int) -> int:
         with self.lock:

@@ -165,8 +165,9 @@ launchctl kickstart -k gui/$(id -u)/local.research-agent.web
   sharpens include/exclude lines, keeping your wording and structure, and never touches the
   categories. The previous file goes to `cache/prompt-backups/`, the dialog shows the exact
   change, and **Undo** puts the old file back. A round takes under a minute and usually costs
-  a few cents. The next run uses the new file. Earlier rounds are shown to the model so it
-  doesn't undo them. From the command line:
+  a few cents. The next run uses the new file. Sending clears the marks and the message, so
+  the next round carries only new feedback (if a round fails, the marks come back). Earlier
+  rounds are shown to the model so it doesn't undo them. From the command line:
   `scripts/agent.sh refine --run 2026-11-05 --message "fewer training papers"`.
   Digests made before this feature have no buttons; `scripts/run.sh --resume <run id>`
   rewrites one with them (it only redoes the daily brief, a few cents).

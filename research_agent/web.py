@@ -124,11 +124,13 @@ def _start_refinement(rid: int, run_id: str, store: Store):
     store.update_refinement(rid, pid=proc.pid)
 
 
-def _round_view(r: dict) -> dict:
+def _round_view(r: dict, store: Store) -> dict:
     """A refinement row as the page shows it; notices a process that died."""
     r = dict(r)
     if r["status"] == "running" and not _alive(r.get("pid")):
         r["status"], r["error"] = "failed", "the process stopped unexpectedly"
+        store.update_refinement(r["rid"], status=r["status"], error=r["error"])
+        store.release_feedback(r["rid"])  # the marks go back on the digest, to send again
     r["changes"] = json.loads(r["changes"] or "[]")
     r.pop("pid", None)
     return r
@@ -380,7 +382,7 @@ def feedback(run_id: str):
     if not store.run(run_id):
         raise HTTPException(404, "Unknown digest.")
     return {"verdicts": store.feedback_for_run(run_id),
-            "rounds": [_round_view(r) for r in store.refinements(run_id)],
+            "rounds": [_round_view(r, store) for r in store.refinements(run_id)],
             "busy": _refining(store)}
 
 
@@ -407,16 +409,18 @@ def start_refine(run_id: str, req: RefineRequest):
     if _refining(store):
         raise HTTPException(409, "The previous round is still being applied.")
     rid = store.add_refinement(run_id, text, sum(v > 0 for v in marks), sum(v < 0 for v in marks))
+    store.claim_feedback(run_id, rid)  # the digest's buttons start clean for the next round
     _start_refinement(rid, run_id, store)
     return {"rid": rid}
 
 
 @app.get("/api/refinements/{rid}")
 def refinement(rid: int):
-    row = Store(ROOT / "state.db").refinement(rid)
+    store = Store(ROOT / "state.db")
+    row = store.refinement(rid)
     if not row:
         raise HTTPException(404, "Unknown round.")
-    return _round_view(row)
+    return _round_view(row, store)
 
 
 @app.post("/api/refinements/{rid}/undo")

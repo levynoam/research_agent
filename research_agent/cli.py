@@ -325,16 +325,19 @@ def cmd_refine(args):
             raise SystemExit("nothing to go on: mark papers in the digest or give --message")
         rid = store.add_refinement(args.run, args.message or "", sum(v > 0 for v in marks),
                                    sum(v < 0 for v in marks))
+        store.claim_feedback(args.run, rid)
         store.update_refinement(rid, pid=os.getpid())
     setup_logging(f"refine-{rid}")
     row = store.refinement(rid)
     cfg = load_config()
     spent = store.spend_for_run(args.run)
     try:
-        out = refine_criteria(args.run, row["text"] or "", cfg, store, LLM(cfg, store, args.run))
+        out = refine_criteria(args.run, row["text"] or "", cfg, store, LLM(cfg, store, args.run),
+                              rid)
     except Exception as e:
         store.update_refinement(rid, status="failed", error=f"{type(e).__name__}: {e}",
                                 usd=store.spend_for_run(args.run) - spent)
+        store.release_feedback(rid)  # the marks go back on the digest, to send again
         raise
     store.update_refinement(rid, status="done" if out["changed"] else "unchanged",
                             changes=json.dumps(out["changes"]), notes=out["notes"],

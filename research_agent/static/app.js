@@ -418,6 +418,16 @@ function renderRounds(rounds) {
     </div>`).join("") : "";
 }
 
+function redrawDigestMarks() {
+  // Reloads the digest page so its +/− buttons show the pending marks (they clear once a
+  // round is sent). A reload works for digests written by any version; the scroll spot is kept.
+  const frame = $("#frame"), win = frame.contentWindow;
+  if (!win || !frame.src) return;
+  const y = win.scrollY;
+  frame.addEventListener("load", () => frame.contentWindow.scrollTo(0, y), { once: true });
+  win.location.reload();
+}
+
 async function loadFeedback() {
   const data = await api(`/api/feedback/${encodeURIComponent(feedback.runId)}`);
   const marks = Object.values(data.verdicts);
@@ -457,6 +467,7 @@ function watchRefinement() {
               : "The feedback round failed");
       }
       if ($("#feedback-dialog").open) await loadFeedback();
+      if (last && last.status === "failed") redrawDigestMarks();  // the marks are back
       loadOverview();
     } catch (e) {
       console.error(e);
@@ -472,8 +483,9 @@ async function submitFeedback(event) {
     await api(`/api/feedback/${encodeURIComponent(feedback.runId)}/refine`, {
       method: "POST", body: JSON.stringify({ text: form.text.value }),
     });
-    form.text.value = "";
+    form.text.value = "";  // the marks and the message went with this round; start clean
     $("#feedback-error").hidden = true;
+    redrawDigestMarks();
     await loadFeedback();
   } catch (e) {
     $("#feedback-error").textContent = e.message;

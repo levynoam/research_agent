@@ -67,8 +67,8 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
-def _verdict_rows(run_id: str, store) -> list[dict]:
-    verdicts = store.feedback_for_run(run_id)
+def _verdict_rows(run_id: str, store, rid: int | None) -> list[dict]:
+    verdicts = store.feedback_for_run(run_id, rid)
     rows = []
     included = {r["id"]: r for r in store.deepread_rows(run_id, relevant=True)}
     rejected = {r["id"]: r for r in store.deepread_rows(run_id, relevant=False)}
@@ -94,10 +94,11 @@ def _verdict_rows(run_id: str, store) -> list[dict]:
     return rows
 
 
-def build_messages(run_id: str, message: str, store) -> tuple[str, str, int, int]:
-    """Returns (system, user, n_pos, n_neg)."""
+def build_messages(run_id: str, message: str, store,
+                   rid: int | None = None) -> tuple[str, str, int, int]:
+    """Returns (system, user, n_pos, n_neg). rid picks the round's marks (None: pending)."""
     current = ensure_from_template(CRITERIA).read_text()
-    rows = _verdict_rows(run_id, store)
+    rows = _verdict_rows(run_id, store, rid)
     n_pos = sum(1 for r in rows if r["verdict"].endswith("(+)"))
     n_neg = len(rows) - n_pos
     earlier = [r for r in store.refinements(limit=PREVIOUS_ROUNDS * 3)
@@ -134,15 +135,16 @@ def _validate(text: str, current_categories: list[str]) -> str:
     return ""
 
 
-def refine_criteria(run_id: str, message: str, cfg: dict, store, llm) -> dict:
+def refine_criteria(run_id: str, message: str, cfg: dict, store, llm,
+                    rid: int | None = None) -> dict:
     """Asks the model for a revised criteria.md and installs it (keeping a backup).
 
-    Returns {changed, changes, notes, backup, diff, after_hash}.
+    Uses the marks sent in round rid. Returns {changed, changes, notes, backup, diff, after_hash}.
     """
     path = ensure_from_template(CRITERIA)
     before = path.read_text()
     categories = load_criteria(path).categories
-    system, user, _, _ = build_messages(run_id, message, store)
+    system, user, _, _ = build_messages(run_id, message, store, rid)
     model = cfg["models"].get("refine") or cfg["models"]["digest"]
 
     out = llm.chat_json("refine", model, system, user, max_tokens=12000)
