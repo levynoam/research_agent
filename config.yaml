@@ -15,6 +15,13 @@ models:
   authors: azure/anthropic/eccn-claude-haiku-5-5    # reads author names and affiliations
   refine: azure/anthropic/eccn-claude-opus-5-5      # turns your feedback into a better criteria.md
 
+# Stand-ins for when a model is at capacity (the Hub answers "429 ... capacity reached").
+# They are tried in this order, in every step; the step's own model is skipped. If all of
+# them are at capacity too, the run stops and can be continued later with Retry.
+fallback_models:
+  - azure/anthropic/eccn-claude-sonnet-5-5
+  - azure/openai/eccn-gpt-6.1-sol
+
 # Fallback prices (USD per 1M tokens), used only if the Hub doesn't report a cost.
 # The Hub normally reports the exact cost of every call, and that is what gets logged.
 pricing:

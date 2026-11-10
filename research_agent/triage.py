@@ -4,7 +4,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from research_agent.llm import BudgetExceeded
+from research_agent.llm import BudgetExceeded, ModelsUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ def triage(papers: list[dict], criteria, cfg: dict, llm, store, run_id: str, pro
             try:
                 done += f.result()
                 progress.advance(detail=f"{done} of {len(papers)} abstracts scored")
-            except BudgetExceeded:
+            except (BudgetExceeded, ModelsUnavailable):
                 raise
             except Exception as e:  # one bad batch shouldn't sink the run
                 log.error("triage batch failed: %s", e)

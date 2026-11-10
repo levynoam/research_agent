@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 
 from research_agent.fulltext import figure_label, get_figures
-from research_agent.llm import BudgetExceeded
+from research_agent.llm import BudgetExceeded, ModelsUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ def make_figures(paper_ids: list[str], run_id: str, fmt, cfg: dict, llm, store,
             store.save_json("figures", pid, record)
             log.info("figure %s: %s", pid, record["choice"] if record["choice"] != "paper"
                      else f"paper {record['label']}")
-        except BudgetExceeded:
+        except (BudgetExceeded, ModelsUnavailable):
             raise
         except Exception as e:
             log.error("figure step failed for %s: %s", pid, e)

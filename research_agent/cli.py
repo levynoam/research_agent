@@ -24,7 +24,7 @@ from research_agent.deepread import deepread
 from research_agent.digest import write_digest
 from research_agent.fetch import fetch_api_window, fetch_new
 from research_agent.figures import make_figures
-from research_agent.llm import LLM, BudgetExceeded
+from research_agent.llm import LLM, BudgetExceeded, ModelsUnavailable
 from research_agent.progress import Progress
 from research_agent.refine import refine_criteria
 from research_agent.research import research_paper
@@ -132,7 +132,14 @@ def cmd_run(args):
         lock = wait_for_lock(progress)  # noqa: F841 (held until the process exits)
         run_pipeline(args, run_id, kind, label, store, progress)
     except BaseException as e:
-        progress.finish("failed", error=f"{type(e).__name__}: {e}")
+        error = f"{type(e).__name__}: {e}"
+        if isinstance(e, ModelsUnavailable):
+            # Stopping beats leaving papers out. Everything finished so far is stored, so
+            # retrying (the Retry button, or run --resume) continues from this point.
+            error = (f"Stopped: {e}. The work finished so far is kept. Press Retry to "
+                     "continue from where it stopped.")
+            log.error(error)
+        progress.finish("failed", error=error)
         store.save_run(run_id, status="failed", finished=datetime.now().isoformat(timespec="seconds"),
                        incomplete=1 if _connection_lost(e) else 0)
         raise

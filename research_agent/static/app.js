@@ -91,6 +91,7 @@ function showRun(id, { keepFrame = false } = {}) {
   $("#viewer-meta").textContent = r ? (r.kind === "adhoc" ? "Ad-hoc digest · " : "Daily digest · ") + runMeta(r) : "";
   const fbButton = $("#feedback-btn");
   $("#delete-btn").hidden = !r || ["running", "queued"].includes(r.state);
+  $("#retry-btn").hidden = !r || !r.can_retry || ["running", "queued"].includes(r.state);
   if (r && r.digest) {
     const src = `${r.digest}?v=${encodeURIComponent(r.usd)}`;
     if (!keepFrame || !frame.src.includes(r.digest)) frame.src = src;
@@ -494,6 +495,26 @@ async function submitFeedback(event) {
     button.disabled = false;
   }
 }
+
+// --- continuing a run that failed or was cut short -------------------------------------
+async function retryRun() {
+  const id = state.selected, button = $("#retry-btn");
+  if (!id) return;
+  button.disabled = true;
+  try {
+    await api(`/api/runs/${encodeURIComponent(id)}/resume`, { method: "POST" });
+    toast("Continuing from where it stopped");
+    state.watching.add(id);
+    await loadRuns();
+    pollStatus();
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("#retry-btn").addEventListener("click", retryRun);
 
 // --- deleting a digest ---------------------------------------------------------------
 async function deleteRun() {

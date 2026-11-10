@@ -20,7 +20,7 @@ class FakeStore:
     def spend_since(self, day):
         return 0.0
 
-    def add_cost(self, *args):
+    def add_cost(self, *args, **kwargs):
         pass
 
 

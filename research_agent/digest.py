@@ -231,6 +231,19 @@ def _contents_table(ordered: list, columns: list[str], affiliations: dict) -> li
     return rows + [""]
 
 
+STAGE_WORDS = {"triage": "abstract-scoring", "deepread": "full-read", "enrich": "author-lookup",
+               "research": "research", "figures": "figure", "digest": "daily-brief"}
+
+
+def _fallback_line(store, run_id: str) -> str:
+    """One line for the digest header about calls a fallback model answered, or ''."""
+    short = lambda m: m.rsplit("/", 1)[-1].removeprefix("eccn-")  # noqa: E731
+    parts = [f"{r['n']} {STAGE_WORDS.get(r['stage'], r['stage'])} call{'s' if r['n'] != 1 else ''} "
+             f"went to {short(r['model'])} because {short(r['wanted'])} was at capacity"
+             for r in store.fallbacks_for_run(run_id)]
+    return "Model fallbacks: " + "; ".join(parts) + "." if parts else ""
+
+
 def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, stats: dict,
                  note: str | None = None, finish_hint: str | None = None) -> tuple[Path, bool]:
     """Writes digests/<run id>.md and .html. stats: fetched, usd, scope (what was scanned).
@@ -311,6 +324,9 @@ def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, 
           f"<span class=\"meta\">{stats.get('fetched', 0)} {stats.get('scope', 'papers')} · "
           f"{len(items)} matched · "
           f"${stats.get('usd', 0):.2f} spent</span>\n"]
+    fallbacks = _fallback_line(store, run_id)
+    if fallbacks:
+        md.append(f"<span class=\"meta\">{html.escape(fallbacks)}</span>\n")
     if note:
         md.append(f"> **Note:** {note}\n")
     if not items:

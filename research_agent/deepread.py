@@ -8,7 +8,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from research_agent.fulltext import code_links, get_fulltext
-from research_agent.llm import BudgetExceeded
+from research_agent.llm import BudgetExceeded, ModelsUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def deepread(candidates: list[dict], criteria, fmt, cfg: dict, llm, store, run_i
             try:
                 f.result()
                 progress.advance()
-            except BudgetExceeded:
+            except (BudgetExceeded, ModelsUnavailable):
                 raise
             except Exception as e:
                 log.error("deepread failed: %s", e)

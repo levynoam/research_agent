@@ -186,9 +186,30 @@ def runs():
             "digest": f"/digests/{html.name}" if html.exists() else None,
             "params": json.loads(r["params"]) if r.get("params") else None,
             "error": s.get("error"), "note": r.get("note"),
+            # A failed or cut-short run that got as far as fetching papers can be continued.
+            "can_retry": bool(r) and (state == "failed" or bool(r.get("incomplete")))
+                         and bool(r.get("n_fetched")),
         })
     out.sort(key=lambda x: x["started"] or "", reverse=True)
     return out
+
+
+@app.post("/api/runs/{run_id}/resume")
+def resume_run(run_id: str):
+    """Continues a run that failed or was cut short. Its papers and finished work are kept;
+    only what is missing is done (see run --resume)."""
+    store = Store(ROOT / "state.db")
+    r = store.run(run_id)
+    if not r:
+        raise HTTPException(404, "Unknown digest.")
+    s = _statuses().get(run_id)
+    if s and s.get("state") in ("queued", "running"):
+        raise HTTPException(409, "This digest is already being made.")
+    if not store.count_for_run(run_id):
+        raise HTTPException(409, "This run stopped before it fetched any papers, so there is "
+                                 "nothing to continue. Start a new one instead.")
+    _spawn(run_id, r.get("kind") or "daily", r.get("label") or run_id, ["--resume", run_id])
+    return {"run_id": run_id}
 
 
 @app.delete("/api/runs/{run_id}")

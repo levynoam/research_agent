@@ -15,7 +15,7 @@ import httpx
 import trafilatura
 
 from research_agent import arxiv_http
-from research_agent.llm import BudgetExceeded
+from research_agent.llm import BudgetExceeded, ModelsUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -192,7 +192,7 @@ def research_paper(p: dict, summary: dict, enrichment: dict, criteria, cfg, llm,
                      json.dumps(args, ensure_ascii=False)[:120])
             try:
                 result = _run_tool(c.function.name, args, ctx)
-            except BudgetExceeded:
+            except (BudgetExceeded, ModelsUnavailable):
                 raise
             except Exception as e:
                 result = f"Error: {e}"

@@ -186,6 +186,16 @@ launchctl kickstart -k gui/$(id -u)/local.research-agent.web
   the model service is reachable again, it resumes that run: same papers, finished work
   reused, only the skipped steps redone. The same applies to a run that died because the
   Mac shut down. Each run is resumed at most 3 times. By hand: `scripts/run.sh --resume 2026-11-03`.
+- **Busy models:** the model service keeps a budget of tokens per minute for each model,
+  shared by all its users, and answers "429 ... capacity reached" at once when it is used
+  up (it doesn't queue). The agent then leaves that model alone for a minute and sends its
+  calls, in every step, to the stand-ins listed under `fallback_models` in `config.yaml`
+  (by default Sonnet, then GPT Sol), returning to the wanted model as soon as it has room.
+  The digest header says how many calls a stand-in answered. If every model in the list
+  stays at capacity for about two minutes, the run **stops** rather than leave papers out:
+  it shows as Failed with the reason, and **Retry** continues it from where it stopped
+  (finished work is kept). Retry also works for any other failed or incomplete run; by
+  hand it is `scripts/run.sh --resume <run id>`.
 - **Days with no papers:** arXiv publishes nothing on weekends and occasionally skips a
   weekday (a holiday or maintenance). Those runs show "No new papers" with the reason.
   Nothing is lost on a skipped weekday: the next run notices the gap and fetches any

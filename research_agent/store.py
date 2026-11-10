@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS costs (
     ts TEXT, run_date TEXT, stage TEXT, model TEXT,   -- run_date holds the run id
     input_tokens INTEGER, output_tokens INTEGER, usd REAL
 );
+CREATE TABLE IF NOT EXISTS fallbacks (         -- calls answered by a fallback model
+    ts TEXT, run_id TEXT, stage TEXT, wanted TEXT, model TEXT
+);
 CREATE TABLE IF NOT EXISTS runs (
     run_date TEXT PRIMARY KEY,                       -- the run id
     started TEXT, finished TEXT, status TEXT,
@@ -188,10 +191,21 @@ class Store:
         return json.loads(rows[0]["data"]) if rows else None
 
     # --- costs ------------------------------------------------------------
-    def add_cost(self, run_id, stage, model, tin, tout, usd):
+    def add_cost(self, run_id, stage, model, tin, tout, usd, fallback_for=None):
+        """Records a call's cost. fallback_for: the model that was wanted, when `model`
+        answered in its place because that one was at capacity."""
+        now = datetime.now().isoformat(timespec="seconds")
         self.execute("INSERT INTO costs VALUES (?,?,?,?,?,?,?)",
-                     (datetime.now().isoformat(timespec="seconds"), run_id, stage, model,
-                      tin, tout, usd))
+                     (now, run_id, stage, model, tin, tout, usd))
+        if fallback_for:
+            self.execute("INSERT INTO fallbacks VALUES (?,?,?,?,?)",
+                         (now, run_id, stage, fallback_for, model))
+
+    def fallbacks_for_run(self, run_id: str) -> list[dict]:
+        """Calls of a run that a fallback model answered: [{stage, wanted, model, n}]."""
+        return [dict(r) for r in self.query(
+            "SELECT stage, wanted, model, count(*) n FROM fallbacks WHERE run_id=? "
+            "GROUP BY stage, wanted, model ORDER BY min(ts)", (run_id,))]
 
     def spend_since(self, since: date) -> float:
         r = self.query("SELECT COALESCE(SUM(usd),0) s FROM costs WHERE ts>=?",
