@@ -181,6 +181,7 @@ def runs():
             "label": r.get("label") or s.get("label") or run_id, "state": state,
             "started": r.get("started") or (datetime.fromtimestamp(s["started"]).isoformat(
                 timespec="seconds") if s.get("started") else None),
+            "finished": r.get("finished"),
             "matched": r.get("n_matched"), "scanned": r.get("n_fetched"),
             "usd": round(r.get("usd") or s.get("usd") or 0, 2),
             "digest": f"/digests/{html.name}" if html.exists() else None,

@@ -186,6 +186,9 @@ launchctl kickstart -k gui/$(id -u)/local.research-agent.web
   the model service is reachable again, it resumes that run: same papers, finished work
   reused, only the skipped steps redone. The same applies to a run that died because the
   Mac shut down. Each run is resumed at most 3 times. By hand: `scripts/run.sh --resume 2026-11-03`.
+- **When a digest was written:** the header of each digest, and the line above it in the web
+  app, show the time it was last written. Two daily runs on the same date share one digest
+  (the second adds its papers), so the time tells you whether it changed since you read it.
 - **Busy models:** the model service keeps a budget of tokens per minute for each model,
   shared by all its users, and answers "429 ... capacity reached" at once when it is used
   up (it doesn't queue). The agent then leaves that model alone for a minute and sends its

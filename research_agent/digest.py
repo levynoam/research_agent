@@ -3,6 +3,7 @@
 import html
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import markdown
@@ -323,7 +324,10 @@ def write_digest(run_id: str, title: str, criteria, fmt, cfg: dict, store, llm, 
     md = [f"# {title}",
           f"<span class=\"meta\">{stats.get('fetched', 0)} {stats.get('scope', 'papers')} · "
           f"{len(items)} matched · "
-          f"${stats.get('usd', 0):.2f} spent</span>\n"]
+          f"${stats.get('usd', 0):.2f} spent · "
+          # When this version was written: a digest is rewritten when a later run on the
+          # same day adds papers to it, or when it is resumed.
+          f"written {datetime.now().astimezone():%a %d %b %Y, %H:%M %Z}</span>\n"]
     fallbacks = _fallback_line(store, run_id)
     if fallbacks:
         md.append(f"<span class=\"meta\">{html.escape(fallbacks)}</span>\n")

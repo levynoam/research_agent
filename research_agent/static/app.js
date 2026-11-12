@@ -54,6 +54,15 @@ function runMeta(r) {
   return bits.join(" · ");
 }
 
+function writtenAt(r) {
+  // When the digest was last written, e.g. "written Tue 10 Nov, 22:14".
+  if (!r.digest || !r.finished) return "";
+  const when = new Date(r.finished);
+  if (isNaN(when)) return "";
+  return " · written " + when.toLocaleString(undefined, {
+    weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 function renderRuns() {
   const list = $("#runs");
   const runs = state.runs.filter((r) => state.filter === "all" || r.kind === state.filter);
@@ -88,7 +97,7 @@ function showRun(id, { keepFrame = false } = {}) {
   renderRuns();
   const frame = $("#frame"), empty = $("#empty"), open = $("#open-tab");
   $("#viewer-title").textContent = r ? r.label : "Pick a digest";
-  $("#viewer-meta").textContent = r ? (r.kind === "adhoc" ? "Ad-hoc digest · " : "Daily digest · ") + runMeta(r) : "";
+  $("#viewer-meta").textContent = r ? (r.kind === "adhoc" ? "Ad-hoc digest · " : "Daily digest · ") + runMeta(r) + writtenAt(r) : "";
   const fbButton = $("#feedback-btn");
   $("#delete-btn").hidden = !r || ["running", "queued"].includes(r.state);
   $("#retry-btn").hidden = !r || !r.can_retry || ["running", "queued"].includes(r.state);
